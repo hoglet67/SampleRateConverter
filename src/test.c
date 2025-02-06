@@ -3,17 +3,14 @@
 #include "tinywav.h"
 
 //#define TEST_46875_48000
-
+//#define TEST_250000_48000
 //#define TEST_96000_44100
-
 #if defined(TEST_46875_48000)
 
 // LCM is 6MHz
 
 #include "coefficients_46875_48000_extended.h"
-
 //#include "coefficients_46875_48000_60.h"
-
 //#include "coefficients_46875_48000_truncated.h"
 
 #define               L   128
@@ -21,6 +18,16 @@
 #define  IN_SAMPLE_RATE 46875
 #define OUT_SAMPLE_RATE 48000
 
+#elif defined(TEST_250000_48000)
+
+// LCM is 6MHz
+
+#include "coefficients_250000_48000_60.h"
+
+#define               L    24
+#define               M   125
+#define  IN_SAMPLE_RATE 250000
+#define OUT_SAMPLE_RATE 48000
 
 #elif defined(TEST_96000_44100)
 

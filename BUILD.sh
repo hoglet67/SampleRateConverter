@@ -1,5 +1,27 @@
 #!/bin/bash
 
+suffix=float.wav
+
+
+gcc -DTEST_250000_48000 src/test.c src/tinywav.c -o build/test
+
+mkdir -p build/250000
+
+for i in \
+    Square_525Hz_6dB
+do
+    infile=tests/250000/${i}_${suffix}
+    outfile=build/250000/${i}_${suffix}
+    echo ${infile}
+    channels=1
+
+    if [ -f ${infile} ]; then
+        ./build/test ${infile} ${outfile} ${channels} 1000
+    else
+        echo "   ...skipping as file ${infile} not present"
+    fi
+
+done
 
 mkdir -p build/infinitewave
 
@@ -15,7 +37,6 @@ cd -
 
 gcc -DTEST_96000_44100 src/test.c src/tinywav.c -o build/test
 
-suffix=float.wav
 for i in Pulses Swept Tone1kHz
 do
     infile=build/infinitewave/${i}_${suffix}
