@@ -12,6 +12,8 @@
 
 #include "coefficients_46875_48000_60.h"
 
+//#include "coefficients_46875_48000_truncated.h"
+
 #define               L   128
 #define               M   125
 #define  IN_SAMPLE_RATE 46875
@@ -35,7 +37,11 @@
 #define    MAX_CHANNELS     2
 #define      BLOCK_SIZE  1024
 
-#define         SCALE   32768.0f
+// Integer scale factor of filter coefficients
+#define          HSCALE 32768
+
+// Integer scale factor of wav file data
+#define          WSCALE 32768
 
 static int read_wav
 (
@@ -163,7 +169,7 @@ int main(int argc, char **argv) {
          // Calculate the mth output sample
          int sum = 0;
          for (int p = 0; p < NTAPS / L; p++) {
-            int d = (n - p) <= 0 ? 0 : ((int) (din[n - p] * SCALE));
+            int d = (n - p) <= 0 ? 0 : ((int) (din[n - p] * WSCALE));
             if (d < min_in) {
                min_in = d;
             }
@@ -173,14 +179,14 @@ int main(int argc, char **argv) {
             // Do the calculation in integer with a scale factor
             sum += hc[p * L + k] * d;
          }
-         sum /= SCALE;
+         sum /= HSCALE;
          if (sum < min_out) {
             min_out = sum;
          }
          if (sum > max_out) {
             max_out = sum;
          }
-         dout[m++] = sum;
+         dout[m++] = ((float) sum) / (float) WSCALE;
          //dout[m++] = din[n]; // very crude resampling
       }
    }
