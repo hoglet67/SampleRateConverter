@@ -52,5 +52,10 @@ do
         channels=1
     fi
 
-    ./build/test ${infile} ${outfile} ${channels} 1000
+    if [ -f ${infile} ]; then
+        ./build/test ${infile} ${outfile} ${channels} 1000
+    else
+        echo "   ...skipping as file ${infile} not present"
+    fi
+
 done
