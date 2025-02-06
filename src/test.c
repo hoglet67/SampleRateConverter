@@ -1,18 +1,40 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "tinywav.h"
-#include "coefficients_2432.h"
+
+//#define TEST_46875_48000
+
+//#define TEST_96000_44100
+
+#if defined(TEST_46875_48000)
+
+// LCM is 6MHz
+
+#include "coefficients_46875_48000_60.h"
+
+#define               L   128
+#define               M   125
+#define  IN_SAMPLE_RATE 46875
+#define OUT_SAMPLE_RATE 48000
 
 
-#define L      128
-#define M      125
+#elif defined(TEST_96000_44100)
+
+// LCM is 14.112MHZ
+
+#include "coefficients_96000_44100_60.h"
+
+#define               L   147
+#define               M   320
+#define  IN_SAMPLE_RATE 96000
+#define OUT_SAMPLE_RATE 44100
+
+#endif
+
 
 // Wav reading/writing code
 #define    NUM_CHANNELS     2
-#define  IN_SAMPLE_RATE 46875
-#define OUT_SAMPLE_RATE 48000
 #define      BLOCK_SIZE  1024
-
 
 static int read_wav
 (
@@ -78,22 +100,34 @@ static int write_wav
       tinywav_write_f(&tw, samples, BLOCK_SIZE);
    }
 
-   tinywav_close_write(&tw);
+tinywav_close_write(&tw);
 }
 
-int main() {
-   int t = 180;
+int main(int argc, char **argv) {
+   int t = 0;
+   if (argc < 3) {
+      fprintf(stderr, "usage %s: infile outfile [ seconds ]\n", argv[0]);
+   }
+   char *infile = argv[1];
+   char *outfile = argv[2];
+   if (argc > 3) {
+      t = atoi(argv[3]);
+   }
+   if (t <= 0) {
+      t = 10;
+   }
+
    int num_in_samples = t * IN_SAMPLE_RATE;
    int *ileft = malloc(num_in_samples * sizeof(int));
    int *iright = malloc(num_in_samples * sizeof(int));
 
-   // Read in the WAV file at 46875 KHz
-   int n = read_wav("assault_iir_wav32.wav", num_in_samples, ileft, iright);
+   // Read in the WAV file at the input sample rate
+   num_in_samples = read_wav(infile, num_in_samples, ileft, iright);
 
-   int num_out_samples = t * OUT_SAMPLE_RATE;
+   int num_out_samples = num_in_samples * L / M;
+
    int *oleft = malloc(num_out_samples * sizeof(int));
    int *oright = malloc(num_out_samples * sizeof(int));
-
 
    int min_in = 0;
    int max_in = 0;
@@ -146,8 +180,8 @@ int main() {
    printf("min_out = %d\n", min_out);
    printf("max_out = %d\n", max_out);
 
-   // Write out the WAV file at 48000 Hz
-   write_wav("assault_iir_wav32_out.wav", num_out_samples, oleft, oright);
+   // Write out the WAV file at the output sample rate
+   write_wav(outfile, num_out_samples, oleft, oright);
 
    return 0;
 }

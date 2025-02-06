@@ -6,18 +6,20 @@ close all;
 clear all;
 #clf;
 
-dB  = 60;
-L = 128;
-M = 125;
-Fsold = 46875;
-Fsnew = Fsold * L;
+dB  = 60
+L = 147
+M = 320
+Fsin = 96000
+Fsimm1 = Fsin * L
+Fsout = Fsimm1 / M
 
-f1 = 20000;
-f2 = Fsold - f1;
+f1 = 20000
+f2 = min(Fsin/2, Fsout/2)
+
 delta_f = f2 - f1;
 
 # Calculate minimum number of taps
-N = dB * Fsnew / (22 * delta_f)
+N = dB * Fsimm1 / (22 * delta_f)
 
 # Round up to the next multiple of L
 N = L * ceil(N / L)
@@ -26,10 +28,10 @@ N = L * ceil(N / L)
 # N = L * 3
 
 # Calculate N tap FIR filter coefficients
-f =  [f1] / (Fsnew / 2)
+f =  [f1] / (Fsimm1 / 2)
 hc = fir1(N-1, f,'low');
 
-freqz(hc,1,512,Fsnew)
+freqz(hc,1,512,Fsimm1)
 
 # Scale coefficients to cope with gain loss due to interpolation
 hc = hc * L;
