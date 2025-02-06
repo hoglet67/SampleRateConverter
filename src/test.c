@@ -33,18 +33,19 @@
 
 
 // Wav reading/writing code
-#define    NUM_CHANNELS     2
+#define    MAX_CHANNELS     2
 #define      BLOCK_SIZE  1024
 
 static int read_wav
 (
     char *filename,
     int num_samples,
+    int stereo,
     int *left,
     int *right)
 {
    int n = 0;
-   float buffer[NUM_CHANNELS * BLOCK_SIZE];
+   float buffer[MAX_CHANNELS * BLOCK_SIZE];
    TinyWav tw;
    int ret = tinywav_open_read(&tw, filename, TW_INTERLEAVED);
    if (ret != 0) {
@@ -63,8 +64,14 @@ static int read_wav
          return n;
       }
       while (ret > 0 && n < num_samples) {
+         if (*bp < -1.0 || *bp > 1.0) {
+            printf("sample out of range: %f\n", *bp);
+            exit(1);
+         }
          *left++ = (int) (32768.0f * (*bp++));
-         *right++ = (int) (32768.0f * (*bp++));
+         if (stereo) {
+            *right++ = (int) (32768.0f * (*bp++));
+         }
          ret--;
          n++;
       }
@@ -79,25 +86,26 @@ static int write_wav
 (
     char *filename,
     int num_samples,
+    int stereo,
     int *left,
     int *right)
 {
 
    TinyWav tw;
-   tinywav_open_write(&tw, NUM_CHANNELS, OUT_SAMPLE_RATE, TW_FLOAT32, TW_INTERLEAVED, filename);
+   float buffer[BLOCK_SIZE * MAX_CHANNELS];
+   tinywav_open_write(&tw, stereo ? 2 : 1, OUT_SAMPLE_RATE, TW_FLOAT32, TW_INTERLEAVED, filename);
 
    for (int i = 0; i < num_samples / BLOCK_SIZE; i++) {
       // NOTE: samples are always expected in float32 format,
       // regardless of file sample format
-
-      float samples[BLOCK_SIZE * NUM_CHANNELS];
-
+      float *bp = buffer;
       for (int j = 0; j < BLOCK_SIZE; j++) {
-         samples[2 * j]     = ((float) (*left++)) / 32768.0f;
-         samples[2 * j + 1] = ((float) (*right++)) / 32768.0f;
+         *bp++ = ((float) (*left++)) / 32768.0f;
+         if (stereo) {
+            *bp++ = ((float) (*right++)) / 32768.0f;
+         }
       }
-
-      tinywav_write_f(&tw, samples, BLOCK_SIZE);
+      tinywav_write_f(&tw, buffer, BLOCK_SIZE);
    }
 
 tinywav_close_write(&tw);
@@ -105,24 +113,24 @@ tinywav_close_write(&tw);
 
 int main(int argc, char **argv) {
    int t = 0;
-   if (argc < 3) {
-      fprintf(stderr, "usage %s: infile outfile [ seconds ]\n", argv[0]);
+   if (argc < 4) {
+      fprintf(stderr, "usage %s: infile outfile num_channel [ seconds ]\n", argv[0]);
    }
    char *infile = argv[1];
    char *outfile = argv[2];
-   if (argc > 3) {
-      t = atoi(argv[3]);
+   int stereo = (atoi(argv[3]) == 2);
+   if (argc > 4) {
+      t = atoi(argv[4]);
    }
    if (t <= 0) {
       t = 10;
    }
-
    int num_in_samples = t * IN_SAMPLE_RATE;
    int *ileft = malloc(num_in_samples * sizeof(int));
    int *iright = malloc(num_in_samples * sizeof(int));
 
    // Read in the WAV file at the input sample rate
-   num_in_samples = read_wav(infile, num_in_samples, ileft, iright);
+   num_in_samples = read_wav(infile, num_in_samples, stereo, ileft, iright);
 
    int num_out_samples = num_in_samples * L / M;
 
@@ -181,7 +189,7 @@ int main(int argc, char **argv) {
    printf("max_out = %d\n", max_out);
 
    // Write out the WAV file at the output sample rate
-   write_wav(outfile, num_out_samples, oleft, oright);
+   write_wav(outfile, num_out_samples, stereo, oleft, oright);
 
    return 0;
 }

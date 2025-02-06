@@ -21,5 +21,11 @@ do
     infile=build/infinitewave/${i}_${suffix}
     outfile=build/${i}_${suffix}
     echo ${infile}
-    ./build/test ${infile} ${outfile} 100
+    if [ "$i" == "Tone1kHz" ]; then
+        channels=2
+    else
+        channels=1
+    fi
+
+    ./build/test ${infile} ${outfile} ${channels} 100
 done
