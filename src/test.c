@@ -10,7 +10,9 @@
 
 // LCM is 6MHz
 
-#include "coefficients_46875_48000_60.h"
+#include "coefficients_46875_48000_extended.h"
+
+//#include "coefficients_46875_48000_60.h"
 
 //#include "coefficients_46875_48000_truncated.h"
 
