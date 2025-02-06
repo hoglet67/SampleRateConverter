@@ -155,16 +155,15 @@ int main(int argc, char **argv) {
       float *din = c ? iright : ileft;
       float *dout = c ? oright : oleft;
 
+      // The sub filter to use for the mth sample, updated incrementally so
+      //  k = (m * M) % L
+      int k = 0;
+
+      // The most recent input sample to use, updated incrementally so
+      //  n = (m * M) / L
+      int n = 0;
+
       while (m < num_out_samples) {
-
-         // Calculate the sub filter to use for the mth sample
-         int k = m * M % L;
-
-         //Very messed up resampling
-         //int k = rand() % L;
-
-         // Calculate the most recent input sample
-         int n = m * M / L;
 
          // Calculate the mth output sample
          int sum = 0;
@@ -187,6 +186,16 @@ int main(int argc, char **argv) {
             max_out = sum;
          }
          dout[m++] = ((float) sum) / (float) WSCALE;
+
+         // Updates k and m incrementally such that:
+         //     k = (m * M) % L
+         //     n = (m * M) / L
+         k += M;
+         while (k >= L) {
+            k -= L;
+            n++;
+         }
+
          //dout[m++] = din[n]; // very crude resampling
       }
    }
