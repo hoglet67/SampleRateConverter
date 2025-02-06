@@ -31,18 +31,19 @@
 
 #endif
 
-
 // Wav reading/writing code
 #define    MAX_CHANNELS     2
 #define      BLOCK_SIZE  1024
+
+#define         SCALE   32768.0f
 
 static int read_wav
 (
     char *filename,
     int num_samples,
     int stereo,
-    int *left,
-    int *right)
+    float *left,
+    float *right)
 {
    int n = 0;
    float buffer[MAX_CHANNELS * BLOCK_SIZE];
@@ -68,9 +69,9 @@ static int read_wav
             printf("sample out of range: %f\n", *bp);
             exit(1);
          }
-         *left++ = (int) (32768.0f * (*bp++));
+         *left++ = *bp++;
          if (stereo) {
-            *right++ = (int) (32768.0f * (*bp++));
+            *right++ = *bp++;
          }
          ret--;
          n++;
@@ -87,8 +88,8 @@ static int write_wav
     char *filename,
     int num_samples,
     int stereo,
-    int *left,
-    int *right)
+    float *left,
+    float *right)
 {
 
    TinyWav tw;
@@ -100,9 +101,9 @@ static int write_wav
       // regardless of file sample format
       float *bp = buffer;
       for (int j = 0; j < BLOCK_SIZE; j++) {
-         *bp++ = ((float) (*left++)) / 32768.0f;
+         *bp++ = *left++;
          if (stereo) {
-            *bp++ = ((float) (*right++)) / 32768.0f;
+            *bp++ = *right++;
          }
       }
       tinywav_write_f(&tw, buffer, BLOCK_SIZE);
@@ -126,16 +127,16 @@ int main(int argc, char **argv) {
       t = 10;
    }
    int num_in_samples = t * IN_SAMPLE_RATE;
-   int *ileft = malloc(num_in_samples * sizeof(int));
-   int *iright = malloc(num_in_samples * sizeof(int));
+   float *ileft = malloc(num_in_samples * sizeof(float));
+   float *iright = malloc(num_in_samples * sizeof(float));
 
    // Read in the WAV file at the input sample rate
    num_in_samples = read_wav(infile, num_in_samples, stereo, ileft, iright);
 
    int num_out_samples = num_in_samples * L / M;
 
-   int *oleft = malloc(num_out_samples * sizeof(int));
-   int *oright = malloc(num_out_samples * sizeof(int));
+   float *oleft = malloc(num_out_samples * sizeof(float));
+   float *oright = malloc(num_out_samples * sizeof(float));
 
    int min_in = 0;
    int max_in = 0;
@@ -145,8 +146,8 @@ int main(int argc, char **argv) {
    for (int c = 0; c < 2; c++) {
 
       int m = 0;
-      int *din = c ? iright : ileft;
-      int *dout = c ? oright : oleft;
+      float *din = c ? iright : ileft;
+      float *dout = c ? oright : oleft;
 
       while (m < num_out_samples) {
 
@@ -162,16 +163,17 @@ int main(int argc, char **argv) {
          // Calculate the mth output sample
          int sum = 0;
          for (int p = 0; p < NTAPS / L; p++) {
-            int d = (n - p) >= 0 ? din[n - p] : 0;
+            int d = (n - p) <= 0 ? 0 : ((int) (din[n - p] * SCALE));
             if (d < min_in) {
                min_in = d;
             }
             if (d > max_in) {
                max_in = d;
             }
+            // Do the calculation in integer with a scale factor
             sum += hc[p * L + k] * d;
          }
-         sum >>= 15;
+         sum /= SCALE;
          if (sum < min_out) {
             min_out = sum;
          }
