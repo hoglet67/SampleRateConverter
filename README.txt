@@ -167,10 +167,10 @@ consider:
 Shared filter implementation
 ============================
 
-In this section we consider the feasibilit of a sharing a single
+In this section we consider the feasibility of a sharing a single
 filter between all three sources.
 
-Summarising the filter requirements we arrived on above:
+Summarising the minimum filter requirements we arrived on above:
 
                 L     M      Multiplies             NTaps
                           12KHz 15KHz 20KHz   12KHz 15KHz 20KHz
@@ -178,13 +178,9 @@ Music 5000 L   128   125     12    16    38    1536  2048  4864
 Music 5000 R   128   125     12    16    38    1536  2048  4864
 SN76489         24   125     57    76   171    1368  1824  4104
 SID              6   125    228   304   682    1368  1824  4092
-               ---          ---   ---   ---
-               286          309   412   929
-               ---          ---   ---   ---
-
-The sum of the values in the L column gives the number of samples
-storage required. If each is rounded up to the next power of two, it
-makes the pointer arithmetic easy. That would be 128+128+32+8=296.
+                            ---   ---   ---
+                            309   412   929
+                            ---   ---   ---
 
 Considering the number of multiplies, the totals are all less than
 1,000. So an implementation with a single physical multiplier would be
@@ -192,18 +188,34 @@ possible, with a system clock rate of 48MHz.
 
 To share a single set of filter coefficients, NTaps would have to be
 integer multiple of 128, 24 and 6. Anything that is a multiple of 384
-would be suitable. More taps is, I think, beneficial as it reduces the
-stop band attenuation.
+(the LCM of 128, 24 and 6) would be suitable. More taps is, I think,
+beneficial as it reduces the stop band attenuation.
 
 It's interesting to consider how much we could achieve with one
 multiplier and a pair of block RAMs. On the Gowin architecture, a
 block RAM is 2048x9, so a pair of block RAMs gives a store of 2048x18
 bits. This is a convenient size.
 
-The block RAM would be split between input storage (296 words) and
-coefficient storage (max of 1752 words). As the filters are symmetric,
-that allows a filter of NTaps = 3504 (1752 * 2). The nearest value
-that is a multiple of 384 is NTaps = 3456 (384 * 9).
+The block RAM is needed for filter coefficients and for sample
+buffering. As the block RAM is dual port, one port could be used to
+read the coefficients, and the other port to read/write the sample
+buffer.
+
+The filter coefficients are symmetric, so there are NTaps/2 values to
+store. The sample buffering size matches the total number of
+multiplies (as each multiply uses a different sample).
+
+There is a spreadsheet (parameters.ods) that allows experimentation
+with different choices here.
+
+A NTaps value of 2688 (384*7) gives the highest utilisation of a 2048x18
+block RAM:
+
+  coefficient storage: 1344 words
+          buffering:  602 words
+                     ----
+                     1946 words
+                     ----
 
 We can explore the noise / bandwidth trade off with a filter of this
 size, using the following approximation:
@@ -212,34 +224,102 @@ NTaps =    Atten * Fsfilter
         --------------------
         22 * (Fstop - Fstart)
 
-Re-arranging this and substituting NTaps=3456, Fstop=24, Fsfilter=6000 gives:
+rearranging gives:
 
-Fstart = 24 - 0.0789 * Atten
+Fstart = Fstop - Atten * Fsfilter
+                 ----------------
+                    22 * NTaps
+
+Substituting NTaps=2688, Fstop=24, Fsfilter=6000 gives:
+
+Fstart = 24 - 0.1015 * Atten
+
+This gives the following performance curve:
 
 Atten:    Fstart:
-  40dB  20.844KHz
-  50dB  20.055KHz
-  60dB  19.266KHz
-  70dB  18.477KHz
-  80dB  17.688KHz
-  90dB  16.899KHz
+  40dB    19.94KHz
+  45dB    19.43KHz
+  50dB    18.93KHz
+  55dB    18.42KHz
+  60dB    17.91KHz
+  65dB    17.41KHz
+  70dB    16.90KHz
+  75dB    16.39KHz
+  80dB    15.88KHz
+  85dB    15.38KHz
+  90dB    14.87KHz
+
+The number of multiplies is 602.
+
+That leave about 40% of the cycles free.
 
 This allows a nice trade off between noise floor and bandwidth to be
 made at simply by calculating the filter coefficients differently.
 
-The number of multiplies would be:
+We can explore some larger block RAM sizes.
 
-                L    NTaps  Ntaps/L=Multiplies
+---------------------------------------------------------
 
-Music 5000 L   128   3456     27
-Music 5000 R   128   3456     27
-SN76489         24   3456    144
-SID              6   3456    576
-                             ---
-                             774
-                             ---
+Increasing the block RAM size to 3072 x 18 would allow NTaps = 4224.
 
-That leaves just over 20% of the cycles free.
+This gives the following performance curve:
+
+Atten:    Fstart:
+  40dB    21.42KHz
+  45dB    21.09KHz
+  50dB    20.77KHz
+  55dB    20.45KHz
+  60dB    20.13KHz
+  65dB    19.80KHz
+  70dB    19.48KHz
+  75dB    19.16KHz
+  80dB    18.83KHz
+  85dB    18.51KHz
+  90dB    18.19KHz
+
+The number of multiplies is 946.
+
+That leaves about 5% of the cycles free.
+
+---------------------------------------------------------
+
+Increasing the block RAM size to 4096 x 18 would allow NTaps = 5376.
+
+This gives the following performance curve:
+
+Atten:    Fstart:
+  40dB    21.97KHz
+  45dB    21.72KHz
+  50dB    21.46KHz
+  55dB    21.21KHz
+  60dB    20.96KHz
+  65dB    20.70KHz
+  70dB    20.45KHz
+  75dB    20.20KHz
+  80dB    19.94KHz
+  85dB    19.69KHz
+  90dB    19.43KHz
+
+The number of multiplies is 1204.
+
+That exceeds the number of available cycles, so two physical
+multipliers would be needed.
+
+
+Detailed Timing
+===============
+
+Assuming a 48MHz system clock:
+
+Input:
+     Music 5000 L input sample every 1024 cycles
+     Music 5000 R input sample every 1024 cycles
+     SN76489      input sample every  192 cycles
+     SID          input sample every   48 cycles
+
+Output sample every 1000 cycles.
+
+TO BE CONTINUED
 
 ---
 
