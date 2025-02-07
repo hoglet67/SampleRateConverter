@@ -212,10 +212,10 @@ A NTaps value of 2688 (384*7) gives the highest utilisation of a 2048x18
 block RAM:
 
   coefficient storage: 1344 words
-          buffering:  602 words
-                     ----
-                     1946 words
-                     ----
+            buffering:  602 words
+                       ----
+                       1946 words
+                       ----
 
 We can explore the noise / bandwidth trade off with a filter of this
 size, using the following approximation:
@@ -309,17 +309,95 @@ multipliers would be needed.
 Detailed Timing
 ===============
 
-Assuming a 48MHz system clock:
+Assume everthing running from a single 48MHz system clock.
 
-Input:
-     Music 5000 L input sample every 1024 cycles
-     Music 5000 R input sample every 1024 cycles
-     SN76489      input sample every  192 cycles
-     SID          input sample every   48 cycles
+Output sample must be produced every 1000 cycles (i.e. @ 48KHz)
 
-Output sample every 1000 cycles.
+Input cycle is asnchronous to this:
+     Music 5000 L input sample every 1024 cycles, min buffer is  21 words
+     Music 5000 R input sample every 1024 cycles, min buffer is  21 words
+     SN76489      input sample every  192 cycles, min buffer is 112 words
+     SID          input sample every   48 cycles, min buffer is 448 words
 
-TO BE CONTINUED
+
+There is a buffer for each port channel, the min (NTaps/L).
+
+We round these up to the next power of two, for two reasons:
+- so the input doesn't have to be phase locked to the output
+- so the circular buffer pointer arithemtic is each
+
+This uses 32+32+128+512 = 704 words, plus 1344 filter coefficients.
+
+With the 1344 filter coefficients that packs exactly into 2048 words.
+
+Each source needs a seperate read and write pointer.
+
+The write pointer is the offset where the next input sample is to be
+written. After writimg the sample, the pointer is incremented by one,
+modulo the buffer size.
+
+The read pointer is the offset of the most recent sample visible to
+the channel filter. It's incremented at the end of the 48KHz cycle, by
+an amount that depends on whether the filter index K has wrapped.
+
+As a reminder, in the C code we have:
+         // Updates k and m incrementally such that:
+         //     k = (m * M) % L
+         //     n = (m * M) / L
+         k += M;
+         while (k >= L) {
+            k -= L;
+            n++;
+         }
+
+In VHDL we use Inc2 if k has wrapped, otherwise Inc1.
+
+                L     M     Inc1  Inc2
+Music 5000     128   125    0     1
+SN76489         24   125    5     6
+SID              6   125    20    21
+
+602 cycles are needed for multiplies; this uses both RAM ports:
+- Port A reads the sample from the buffer
+- Port B reads the filter coefficient from the
+
+The order in which the filters are evaluated makes no difference, as
+long as a the calculations are complete within the 1000 cycles.
+
+State:
+
+Init        acc1  = 0; outL = 0; outR = 0
+Music5000L  acc1 += coeff0 * data @ rd offset  0
+Music5000L  acc1 += coeff1 * data @ rd offset -1
+            ...
+Music5000L  acc1 += coeff20 * data @ rd offset -20
+Scale       acc1 *= 20 (L)
+Transfer    outL = acc1; acc1 = 0
+Music5000R  acc1 += coeff0 * data @ rd offset  0
+Music5000R  acc1 += coeff1 * data @ rd offset -1
+            ...
+Music5000R  acc1 += coeff20 * data @ rd offset -20
+Scale       acc1 *= 20 (L)
+Transfer    outR = acc1; acc1 = 0
+SN76489     acc1 += coeff0 * data @ rd offset  0
+SN76489     acc1 += coeff0 * data @ rd offset -1
+            ...
+SN76489     acc1 += coeff111 * data @ rd offset -111
+Scale       acc1 *= 112
+Transfer    outL += acc1; outR += acc1; acc1 = 0
+SID         acc1 += coeff0 * data @ rd offset  0
+SID         acc1 += coeff0 * data @ rd offset -1
+            ...
+SID         acc1 += coeff447 * data @ rd offset -447
+Scale       acc1 *= 448
+Transfer    outL += acc1; outR += acc1; acc1 = 0
+
+This needs to be sequenced by a state machine, with appropriately
+pipelined control signals to the DSP Multiply/Accumulate, which has
+registered inputs and outputs.
+
+In the event an input sample arrived, this will take priority and the
+pipeline is stalled in it's current state.
 
 ---
 
