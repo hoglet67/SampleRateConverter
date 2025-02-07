@@ -53,13 +53,13 @@ Some notes on polyphase filters for sample rate conversion
   Fstop = end of the transition band; this driven by the need to avoid
   aliasing, and is the minimum of Fsin/2 and Fsout/2.
 
-  The minimum required number of taps, Ntaps, is approximated by:
+  The minimum required number of taps, NTaps, is approximated by:
 
-  Ntaps =  Atten
+  NTaps =  Atten
           -------
           22 * Tw
 
-  Note: For the polyphase implementation, Ntaps needs to be a integer
+  Note: For the polyphase implementation, NTaps needs to be a integer
   multiple of L.
 
 For now, we'll assume Atten = 60dB, then come back to this later.
@@ -134,7 +134,7 @@ In implementing this sample rate converter in an FPGA we need to
 consider:
 
 - the requirements for filter coefficient storage. The filter is
-  symmetric, so there are Ntaps/2 unique coefficients with 16-bit or
+  symmetric, so there are NTaps/2 unique coefficients with 16-bit or
   18-bit precision. A 2KB block RAM can store 2048 coefficients.
 
 - the requirements for input buffering. The filter needs to store
@@ -167,63 +167,79 @@ consider:
 Shared filter implementation
 ============================
 
-Summarising the above:
+In this section we consider the feasibilit of a sharing a single
+filter between all three sources.
 
-                   Multiples               NTaps          L     M
-               12KHz 15KHz 20KHz     12KHz 15KHz 20KHz
-Music 5000 L    12    16    38       1536  2048  4864    128   125
-Music 5000 R    12    16    38       1536  2048  4864    128   125
-SN67489         57    76   171       1368  1824  4104     24   125
-SID            228   304   682       1368  1824  4092      6   125
-               ---   ---   ---                           ---
-               309   412   929                           286
-               ---   ---   ---                           ---
+Summarising the filter requirements we arrived on above:
 
-The total of the L column gives the number of samples storage
-required. If each is rounded up to the next power of two, it makes the
-pointer arithmetic easy. That would be 128+128+32+8=296.
+                L     M      Multiplies             NTaps
+                          12KHz 15KHz 20KHz   12KHz 15KHz 20KHz
+Music 5000 L   128   125     12    16    38    1536  2048  4864
+Music 5000 R   128   125     12    16    38    1536  2048  4864
+SN76489         24   125     57    76   171    1368  1824  4104
+SID              6   125    228   304   682    1368  1824  4092
+               ---          ---   ---   ---
+               286          309   412   929
+               ---          ---   ---   ---
+
+The sum of the values in the L column gives the number of samples
+storage required. If each is rounded up to the next power of two, it
+makes the pointer arithmetic easy. That would be 128+128+32+8=296.
 
 Considering the number of multiplies, the totals are all less than
 1,000. So an implementation with a single physical multiplier would be
-possible.
+possible, with a system clock rate of 48MHz.
 
-To share a single set of filter coefficients, Ntaps would have to be
+To share a single set of filter coefficients, NTaps would have to be
 integer multiple of 128, 24 and 6. Anything that is a multiple of 384
 would be suitable. More taps is, I think, beneficial as it reduces the
 stop band attenuation.
 
 It's interesting to consider how much we could achieve with one
-multiplier and a pair of block RAMs.
+multiplier and a pair of block RAMs. On the Gowin architecture, a
+block RAM is 2048x9, so a pair of block RAMs gives a store of 2048x18
+bits. This is a convenient size.
 
-On the Gowin architecture, a block RAM is 2048x9, so a pair of block
-RAMs gives a store of 2048x18 bits.
+The block RAM would be split between input storage (296 words) and
+coefficient storage (max of 1752 words). As the filters are symmetric,
+that allows a filter of NTaps = 3504 (1752 * 2). The nearest value
+that is a multiple of 384 is NTaps = 3456 (384 * 9).
 
-This would be split between input storage (296 words) and coefficient
-storage (1752 words). As the filters are symmetric, that allows a
-filter of NTaps = 3504 (1752 * 2). The nearest value that is a
-multiple of 384 is Ntaps = 3456 (384 * 9).
+We can explore the noise / bandwidth trade off with a filter of this
+size, using the following approximation:
 
-This number of taps would allow a bandwidth of:
-- 19.2KHz with stop band attenuation of 60dB
-
-Ntaps =    Atten * Fsfilter
+NTaps =    Atten * Fsfilter
         --------------------
         22 * (Fstop - Fstart)
 
-Re-arranging this and substituting Ntaps=3456, Fstop=24, Fsfilter=6000 gives:
+Re-arranging this and substituting NTaps=3456, Fstop=24, Fsfilter=6000 gives:
 
 Fstart = 24 - 0.0789 * Atten
 
 Atten:    Fstart:
- 40dB  20.844KHz
- 50dB  20.055KHz
- 60dB  19.266KHz
- 70dB  18.477KHz
- 80dB  17.688KHz
- 90dB  16.899KHz
+  40dB  20.844KHz
+  50dB  20.055KHz
+  60dB  19.266KHz
+  70dB  18.477KHz
+  80dB  17.688KHz
+  90dB  16.899KHz
 
 This allows a nice trade off between noise floor and bandwidth to be
 made at simply by calculating the filter coefficients differently.
+
+The number of multiplies would be:
+
+                L    NTaps  Ntaps/L=Multiplies
+
+Music 5000 L   128   3456     27
+Music 5000 R   128   3456     27
+SN76489         24   3456    144
+SID              6   3456    576
+                             ---
+                             774
+                             ---
+
+That leaves just over 20% of the cycles free.
 
 ---
 
