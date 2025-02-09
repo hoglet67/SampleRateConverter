@@ -9,8 +9,8 @@
 
 // LCM is 6MHz
 
-#include "coefficients_46875_48000_extended.h"
-//#include "coefficients_46875_48000_60.h"
+//#include "coefficients_46875_48000_extended.h"
+#include "coefficients_46875_48000_60.h"
 //#include "coefficients_46875_48000_truncated.h"
 
 #define               L   128
@@ -199,12 +199,19 @@ int main(int argc, char **argv) {
          // Updates k and m incrementally such that:
          //     k = (m * M) % L
          //     n = (m * M) / L
-         k += M;
-         while (k >= L) {
-            k -= L;
-            n++;
-         }
 
+         k += M % L;
+         if (k >= L) {
+            k -= L;
+            n += (M / L) + 1;
+         } else {
+            n += (M / L);
+         }
+         /* k += M; */
+         /* while (k >= L) { */
+         /*    k -= L; */
+         /*    n ++; */
+         /* } */
          //dout[m++] = din[n]; // very crude resampling
       }
    }
