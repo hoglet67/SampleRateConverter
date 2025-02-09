@@ -77,10 +77,10 @@ architecture rtl of sample_rate_converter is
     -- ------------------------------------------------------------------------------
 
     -- A single register to capture input data before it's writtem to the RAM
-    signal r_channel_data : t_sample_array;
+    signal channel_data : t_sample_array;
 
     -- A register to indicate data is pending on the channel
-    signal r_channel_dav : std_logic_vector(NUM_CHANNELS - 1 downto 0);
+    signal channel_dav : std_logic_vector(NUM_CHANNELS - 1 downto 0);
 
     -- A function that returns true if all bits of the SLV are zero, or the SLV is an empty slice
     function all_bits_clear(slv : in std_logic_vector) return boolean is
@@ -150,8 +150,8 @@ architecture rtl of sample_rate_converter is
     -- Buffer read / write pointers
     type t_buffer_addr_array is array(0 to NUM_CHANNELS - 1)
         of unsigned(BUFFER_A_WIDTH - 1 downto 0);
-    signal r_rd_addr : t_buffer_addr_array;
-    signal r_wr_addr : t_buffer_addr_array;
+    signal rd_addr : t_buffer_addr_array;
+    signal wr_addr : t_buffer_addr_array;
 
     -- The initial offset offset between read and write pointers
     -- (initially the buffer will contain this many zero)
@@ -169,10 +169,10 @@ architecture rtl of sample_rate_converter is
         transfer
     );
 
-    signal r_state 	: 	t_state_main := init;
-    signal r_current_channel : unsigned(1 downto 0) := (others => '0'); -- should depend on NUM_CHANNELS!
-    signal r_coeff_count : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
-    signal r_coeff_ptr : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
+    signal state 	: 	t_state_main := init;
+    signal current_channel : unsigned(1 downto 0) := (others => '0'); -- should depend on NUM_CHANNELS!
+    signal coeff_count : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
+    signal coeff_ptr : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
     signal rate_counter : unsigned(9 downto 0); -- TODO: determine width from output rate
 
     -- ------------------------------------------------------------------------------
@@ -186,12 +186,12 @@ architecture rtl of sample_rate_converter is
     signal accumulator : signed(ACCUMULATOR_WIDTH - 1 downto 0);
 
     -- For testing purposes
-    signal r_channel_data_i : signed(SAMPLE_WIDTH - 1 downto 0);
+    signal channel_data_i : signed(SAMPLE_WIDTH - 1 downto 0);
 
 begin
 
     -- For testing, a it's hard to see inside arrays
-    r_channel_data_i <= r_channel_data(to_integer(r_current_channel));
+    channel_data_i <= channel_data(to_integer(current_channel));
 
     process(clk)
     begin
@@ -199,29 +199,29 @@ begin
             if clk_en = '1' then
                 if reset_n = '0' then
                     for i in 0 to NUM_CHANNELS - 1 loop
-                        r_wr_addr(i) <= to_unsigned(BUFFER_BASE(i) + RD_WR_OFFSET, BUFFER_A_WIDTH);
-                        r_channel_dav(i) <= '0';
-                        r_channel_data(i) <= to_signed(0, SAMPLE_WIDTH);
+                        wr_addr(i) <= to_unsigned(BUFFER_BASE(i) + RD_WR_OFFSET, BUFFER_A_WIDTH);
+                        channel_dav(i) <= '0';
+                        channel_data(i) <= to_signed(0, SAMPLE_WIDTH);
                     end loop;
                 else
                     -- Latch the channel input sample as soon as it appears
                     for i in 0 to NUM_CHANNELS - 1 loop
-                        if channel_clken(i) = '1' and channel_load(i) = '1' and r_channel_dav(i) = '0' then
-                            r_channel_dav(i) <= '1';
-                            r_channel_data(i) <= channel_in(i);
+                        if channel_clken(i) = '1' and channel_load(i) = '1' and channel_dav(i) = '0' then
+                            channel_dav(i) <= '1';
+                            channel_data(i) <= channel_in(i);
                         end if;
                     end loop;
                     buffer_we <= '0';
                     -- Buffer writing
                     for i in 0 to NUM_CHANNELS - 1 loop
                         -- build a priority encode to serialize multiple simultaneous buffer writes
-                        if r_channel_dav(i) = '1' and all_bits_clear(r_channel_dav(i - 1 downto 0)) then
-                            buffer_wr_addr <= r_wr_addr(i);
-                            buffer_wr_data <= r_channel_data(i);
+                        if channel_dav(i) = '1' and all_bits_clear(channel_dav(i - 1 downto 0)) then
+                            buffer_wr_addr <= wr_addr(i);
+                            buffer_wr_data <= channel_data(i);
                             buffer_we <= '1';
-                            r_channel_dav(i) <= '0';
+                            channel_dav(i) <= '0';
                             -- This assume each buffer is aligned on a 2^BUFFER_WIDTH boundary
-                            r_wr_addr(i)(BUFFER_WIDTH(i) - 1 downto 0) <= r_wr_addr(i)(BUFFER_WIDTH(i) - 1 downto 0);
+                            wr_addr(i)(BUFFER_WIDTH(i) - 1 downto 0) <= wr_addr(i)(BUFFER_WIDTH(i) - 1 downto 0);
                         end if;
                     end loop;
                 end if;
@@ -240,10 +240,10 @@ begin
                 acc_reset <= '0';
                 if reset_n = '0' then
                     rate_counter <= (others => '1');
-                    r_state <= init;
+                    state <= init;
                     for i in 0 to NUM_CHANNELS - 1 loop
                         k(i) <= to_unsigned(0, COEFF_A_WIDTH);
-                        r_rd_addr(i) <= to_unsigned(BUFFER_BASE(i), BUFFER_A_WIDTH);
+                        rd_addr(i) <= to_unsigned(BUFFER_BASE(i), BUFFER_A_WIDTH);
                     end loop;
                 else
                     if rate_counter = 0 then
@@ -251,34 +251,34 @@ begin
                     else
                         rate_counter <= rate_counter - 1;
                     end if;
-                    case r_state is
+                    case state is
                         when idle =>
-                            r_current_channel <= (others => '0');
+                            current_channel <= (others => '0');
                             if rate_counter = 0 then
-                                r_state <= init;
+                                state <= init;
                             end if;
                         when init =>
-                            r_coeff_ptr <= k(to_integer(r_current_channel));
-                            r_coeff_count <= to_unsigned(FILTER_NTAPS(to_integer(r_current_channel)), COEFF_A_WIDTH);
+                            coeff_ptr <= k(to_integer(current_channel));
+                            coeff_count <= to_unsigned(FILTER_NTAPS(to_integer(current_channel)), COEFF_A_WIDTH);
                             acc_reset <= '1';
-                            r_state <= calculate;
+                            state <= calculate;
                         when calculate =>
-                            buffer_rd_addr <= r_rd_addr(to_integer(r_current_channel));
-                            coeff_rom_addr <= COEFF_BASE + r_coeff_ptr;
-                            r_coeff_ptr  <= r_coeff_ptr + FILTER_L(to_integer(r_current_channel));
-                            r_coeff_count <= r_coeff_count - 1;
-                            if r_coeff_count = 0 then
-                                r_state <= scale;
+                            buffer_rd_addr <= rd_addr(to_integer(current_channel));
+                            coeff_rom_addr <= COEFF_BASE + coeff_ptr;
+                            coeff_ptr  <= coeff_ptr + FILTER_L(to_integer(current_channel));
+                            coeff_count <= coeff_count - 1;
+                            if coeff_count = 0 then
+                                state <= scale;
                             end if;
                         when scale =>
-                            r_state <= transfer;
+                            state <= transfer;
                         when transfer =>
-                            k(to_integer(r_current_channel)) <= k(to_integer(r_current_channel)) + FILTER_M;
-                            r_current_channel <= r_current_channel + 1;
-                            if r_current_channel = to_unsigned(NUM_CHANNELS - 1, r_current_channel'length) then
-                                r_state <= idle;
+                            k(to_integer(current_channel)) <= k(to_integer(current_channel)) + FILTER_M;
+                            current_channel <= current_channel + 1;
+                            if current_channel = to_unsigned(NUM_CHANNELS - 1, current_channel'length) then
+                                state <= idle;
                             else
-                                r_state <= init;
+                                state <= init;
                             end if;
                      end case;
                  end if;
