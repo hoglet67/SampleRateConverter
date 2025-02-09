@@ -74,6 +74,32 @@ end entity;
 architecture rtl of sample_rate_converter is
 
     -- ------------------------------------------------------------------------------
+    -- Pre-calculate M MOD L and M DIV L for each channel
+    -- ------------------------------------------------------------------------------
+
+    function init_m_mod_l(m : in integer; l : in t_int_array) return t_int_array is
+        variable ret : t_int_array;
+    begin
+        for i in 0 to NUM_CHANNELS - 1 loop
+            ret(i) := m mod l(i);
+        end loop;
+        return ret;
+    end function;
+
+    function init_m_div_l(m : in integer; l : in t_int_array) return t_int_array is
+        variable ret : t_int_array;
+    begin
+        for i in 0 to NUM_CHANNELS - 1 loop
+            ret(i) := m / l(i);
+        end loop;
+        return ret;
+    end function;
+
+    constant M_MOD_L : t_int_array := init_m_mod_l(FILTER_M, FILTER_L);
+
+    constant M_DIV_L : t_int_array := init_m_div_l(FILTER_M, FILTER_L);
+
+    -- ------------------------------------------------------------------------------
     -- Input Data Latches
     -- ------------------------------------------------------------------------------
 
@@ -189,6 +215,9 @@ architecture rtl of sample_rate_converter is
     signal mult_out     : signed(SAMPLE_WIDTH * 2 - 1 downto 0);
     signal accumulator  : signed(ACCUMULATOR_WIDTH - 1 downto 0);
 
+    signal mixer_tmp_l  : signed(OUTPUT_WIDTH - 1 downto 0) := to_signed(0, OUTPUT_WIDTH);
+    signal mixer_tmp_r  : signed(OUTPUT_WIDTH - 1 downto 0) := to_signed(0, OUTPUT_WIDTH);
+
     -- For testing purposes
     signal channel_data_i : signed(SAMPLE_WIDTH - 1 downto 0);
 
@@ -238,7 +267,9 @@ begin
 
     -- Channel state machine
     process(clk)
-        variable tmp : unsigned(COEFF_A_WIDTH downto 0);
+        variable tmp_coeff : unsigned(COEFF_A_WIDTH downto 0);
+        variable tmp_k     : unsigned(COEFF_A_WIDTH downto 0);
+        variable tmp_i     : unsigned(BUFFER_A_WIDTH - 1 downto 0);
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
@@ -285,13 +316,14 @@ begin
                             state <= calculate;
                         when calculate =>
                             buffer_rd_addr <= rd_addr(to_integer(current_channel));
+                            -- This assume each buffer is aligned on a 2^BUFFER_WIDTH boundary
                             acc_multiply(0) <= '1';
-                            tmp := coeff_index;
-                            if tmp >= FILTER_NTAPS / 2 then
-                                tmp := FILTER_NTAPS - tmp;
+                            tmp_coeff := coeff_index;
+                            if tmp_coeff >= FILTER_NTAPS / 2 then
+                                tmp_coeff := FILTER_NTAPS - 1 - tmp_coeff;
                             end if;
-                            coeff_rd_addr <= tmp(COEFF_A_WIDTH - 1 downto 0);
-                            coeff_index  <= coeff_index + FILTER_L(to_integer(current_channel));
+                            coeff_rd_addr <= tmp_coeff(COEFF_A_WIDTH - 1 downto 0);
+                            coeff_index <= coeff_index + FILTER_L(to_integer(current_channel));
                             if multiply_count = 0 then
                                 state <= scale;
                             else
@@ -310,7 +342,23 @@ begin
                                     acc_update_l(0) <= '1';
                                     acc_update_r(0) <= '1';
                             end case;
-                            k(to_integer(current_channel)) <= k(to_integer(current_channel)) + FILTER_M;
+                            -- k += M % L;
+                            -- if (k >= L) {
+                            --   k -= L;
+                            --   n += (M / L) + 1;
+                            -- } else {
+                            --   n += (M / L);
+                            -- }
+                            tmp_k := k(to_integer(current_channel)) + M_MOD_L(to_integer(current_channel));
+                            tmp_i := to_unsigned(M_DIV_L(to_integer(current_channel)), BUFFER_A_WIDTH);
+                            if tmp_k >= FILTER_L(to_integer(current_channel)) then
+                                tmp_k := tmp_k - FILTER_L(to_integer(current_channel));
+                                tmp_i := tmp_i + 1;
+                            end if;
+                            k(to_integer(current_channel)) <= tmp_k;
+                            rd_addr(to_integer(current_channel))(BUFFER_WIDTH(to_integer(current_channel)) - 1 downto 0) <=
+                                rd_addr(to_integer(current_channel))(BUFFER_WIDTH(to_integer(current_channel)) - 1 downto 0) +
+                                tmp_i(BUFFER_WIDTH(to_integer(current_channel)) - 1 downto 0);
                             current_channel <= current_channel + 1;
                             if current_channel = NUM_CHANNELS - 1 then
                                 state <= idle;
@@ -346,28 +394,26 @@ begin
     end process;
 
     -- Output Mixer
+    -- Accumulate the samples for the various channels
     process(clk)
-        -- Accumulate the samples for the various channels
-        variable tmp_l : signed(OUTPUT_WIDTH - 1 downto 0) := to_signed(0, OUTPUT_WIDTH);
-        variable tmp_r : signed(OUTPUT_WIDTH - 1 downto 0) := to_signed(0, OUTPUT_WIDTH);
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
                 --
                 if acc_update_l(acc_update_l'left) = '1' then
-                    tmp_l := tmp_l + accumulator(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH);
+                    mixer_tmp_l <= mixer_tmp_l + accumulator(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH);
                 end if;
                 if acc_update_r(acc_update_r'left) = '1' then
-                    tmp_r := tmp_r + accumulator(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH);
+                    mixer_tmp_r <= mixer_tmp_r + accumulator(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH);
                 end if;
                 if acc_output(acc_output'left) = '1' then
-                    mixer_l    <= tmp_l;
-                    mixer_r    <= tmp_r;
-                    mixer_load <= '1';
-                    tmp_l      := to_signed(0, OUTPUT_WIDTH);
-                    tmp_r      := to_signed(0, OUTPUT_WIDTH);
+                    mixer_l     <= mixer_tmp_l;
+                    mixer_r     <= mixer_tmp_r;
+                    mixer_load  <= '1';
+                    mixer_tmp_l <= to_signed(0, OUTPUT_WIDTH);
+                    mixer_tmp_r <= to_signed(0, OUTPUT_WIDTH);
                 else
-                    mixer_load <= '0';
+                    mixer_load  <= '0';
                 end if;
             end if;
         end if;
