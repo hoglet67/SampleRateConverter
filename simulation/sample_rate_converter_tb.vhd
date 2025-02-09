@@ -7,7 +7,8 @@ use work.sample_rate_converter_pkg.all;
 
 entity sample_rate_converter_tb is
     generic (
-        dacwidth : integer := 18
+        sample_width : integer := 18;
+        output_width : integer := 20
     );
 end sample_rate_converter_tb;
 
@@ -21,13 +22,13 @@ architecture Behavioral of sample_rate_converter_tb is
     signal counter         : unsigned(11 downto 0) := (others => '0');
 
     -- Step input of from 0 to +/- 90% full scale value
-    constant step          : integer := (2 ** (dacwidth - 1)) * 90 / 100;
+    constant step          : integer := (2 ** (sample_width - 1)) * 90 / 100;
 
-    signal audio_l         : signed(dacwidth - 1 downto 0) := (others => '0');
-    signal audio_r         : signed(dacwidth - 1 downto 0) := (others => '0');
+    signal audio_l         : signed(sample_width - 1 downto 0) := (others => '0');
+    signal audio_r         : signed(sample_width - 1 downto 0) := (others => '0');
     signal audio_load      : std_logic := '0';
-    signal mixer_left      : signed(dacwidth - 1 downto 0);
-    signal mixer_right     : signed(dacwidth - 1 downto 0);
+    signal mixer_l         : signed(output_width - 1 downto 0);
+    signal mixer_r         : signed(output_width - 1 downto 0);
     signal mixer_load      : std_logic := '0';
 
     signal channel_in      : t_sample_array;
@@ -60,8 +61,8 @@ begin
                         reset_n <= '1';
                     end if;
                     if counter = 4 then
-                        audio_l <= to_signed(step, dacwidth);
-                        audio_r <= to_signed(-step, dacwidth);
+                        audio_l <= to_signed(step, sample_width);
+                        audio_r <= to_signed(-step, sample_width);
                     end if;
                 end if;
             end if;
@@ -73,8 +74,8 @@ begin
         if rising_edge(clk48) then
             if mixer_load = '1' then
                 report
-                    integer'image(to_integer(mixer_left)) & " " &
-                    integer'image(to_integer(mixer_right));
+                    integer'image(to_integer(mixer_l)) & " " &
+                    integer'image(to_integer(mixer_r));
             end if;
         end if;
     end process;
@@ -88,29 +89,30 @@ begin
 
     channel_clken <= clk6_en & clk6_en & clk6_en & clk6_en;
     channel_load  <= audio_load & audio_load & "00";
-    channel_in    <= ( to_signed(0, dacwidth), to_signed(0, dacwidth), audio_l, audio_r);
+    channel_in    <= ( to_signed(0, sample_width), to_signed(0, sample_width), audio_l, audio_r);
 
     sample_rate_converter_inst : entity work.sample_rate_converter
         generic map (
-            COEFF_BASE        => 1344,
             OUTPUT_RATE       => 1000,           -- 48KHz
+            OUTPUT_WIDTH      => 20,             -- 20 bits
+            FILTER_NTAPS      => 3840,
             FILTER_L          => (6, 24, 128, 128),
             FILTER_M          => 125,
-            FILTER_NTAPS      => (448, 112, 21, 21),
+            CHANNEL_TYPE      => (mono, mono, left_channel, right_channel),
             BUFFER_A_WIDTH    => 10,             -- 1K Words
             COEFF_A_WIDTH     => 11,             -- 2K Words
             ACCUMULATOR_WIDTH => 54,
             BUFFER_WIDTH      => (9, 7, 5, 5)    -- powers of two
             )
         port map (
-            clk            => clk48,
-            reset_n        => reset_n,
-            channel_clken  => channel_clken,
-            channel_load   => channel_load,
-            channel_in     => channel_in,
-            mixer_load     => mixer_load,
-            mixer_left     => mixer_left,
-            mixer_right    => mixer_right
+            clk               => clk48,
+            reset_n           => reset_n,
+            channel_clken     => channel_clken,
+            channel_load      => channel_load,
+            channel_in        => channel_in,
+            mixer_load        => mixer_load,
+            mixer_l           => mixer_l,
+            mixer_r           => mixer_r
             );
 
 end Behavioral;

@@ -43,11 +43,21 @@ package sample_rate_converter_pkg is
 
     constant SAMPLE_WIDTH      : integer := 18;
 
+    type t_channel_type is (
+        left_channel,
+        right_channel,
+        mono
+    );
+
+    type t_channel_type_array is array(natural range 0 to NUM_CHANNELS - 1)
+        of t_channel_type;
+
     type t_sample_array is array(natural range 0 to NUM_CHANNELS - 1)
         of signed(SAMPLE_WIDTH - 1 downto 0);
 
     type t_int_array is array(0 to NUM_CHANNELS - 1)
         of integer;
+
 
 end package;
 

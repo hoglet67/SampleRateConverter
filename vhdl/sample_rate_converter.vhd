@@ -43,11 +43,12 @@ use work.sample_rate_converter_pkg.all;
 
 entity sample_rate_converter is
     generic (
-        COEFF_BASE        : integer;
         OUTPUT_RATE       : integer;
+        OUTPUT_WIDTH      : integer;
+        FILTER_NTAPS      : integer;
         FILTER_L          : t_int_array;
         FILTER_M          : integer;
-        FILTER_NTAPS      : t_int_array;
+        CHANNEL_TYPE      : t_channel_type_array;
         BUFFER_A_WIDTH    : integer;
         COEFF_A_WIDTH     : integer;
         ACCUMULATOR_WIDTH : integer;
@@ -65,8 +66,8 @@ entity sample_rate_converter is
 
         -- Stereo output
         mixer_load        : out std_logic;
-        mixer_left        : out signed(SAMPLE_WIDTH - 1 downto 0);
-        mixer_right       : out signed(SAMPLE_WIDTH - 1 downto 0)
+        mixer_l           : out signed(OUTPUT_WIDTH - 1 downto 0);
+        mixer_r           : out signed(OUTPUT_WIDTH - 1 downto 0)
         );
 end entity;
 
@@ -99,19 +100,15 @@ architecture rtl of sample_rate_converter is
     -- Coefficient ROM
     -- ------------------------------------------------------------------------------
 
-    -- TODO: Add init function from file
-
     -- Coefficient Block ROM
-    type t_coeff_rom is array(0 to 2**COEFF_A_WIDTH - 1) of signed(SAMPLE_WIDTH - 1 downto 0);
-    shared variable coeff_rom : t_coeff_rom := (others => (others => '0'));
 
     -- Coefficient ROM Ports
-    signal coeff_rom_addr : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
-    signal coeff_rom_data : signed(SAMPLE_WIDTH - 1 downto 0) := (others => '0');
+    signal coeff_rd_addr : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
+    signal coeff_rd_data : signed(SAMPLE_WIDTH - 1 downto 0) := (others => '0');
 
     -- Coefficient Pointers
     type t_coeff_addr_array is array(0 to NUM_CHANNELS - 1)
-        of unsigned(COEFF_A_WIDTH - 1 downto 0);
+        of unsigned(COEFF_A_WIDTH downto 0);
 
     signal k : t_coeff_addr_array :=  (others => (others => '0'));
 
@@ -171,19 +168,26 @@ architecture rtl of sample_rate_converter is
 
     signal state 	: 	t_state_main := init;
     signal current_channel : unsigned(1 downto 0) := (others => '0'); -- should depend on NUM_CHANNELS!
-    signal coeff_count : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
-    signal coeff_ptr : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
+    signal multiply_count : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
+    signal coeff_index : unsigned(COEFF_A_WIDTH downto 0) := (others => '0');
     signal rate_counter : unsigned(9 downto 0); -- TODO: determine width from output rate
 
     -- ------------------------------------------------------------------------------
     -- DSP
     -- ------------------------------------------------------------------------------
-    signal acc_reset : std_logic := '0';
 
-    signal sample : signed(SAMPLE_WIDTH - 1 downto 0);
-    signal coefficient : signed(SAMPLE_WIDTH - 1 downto 0);
-    signal mult : signed(SAMPLE_WIDTH * 2 - 1 downto 0);
-    signal accumulator : signed(ACCUMULATOR_WIDTH - 1 downto 0);
+    -- Control signal delays to match data pipeline
+    signal acc_clear    : std_logic_vector(3 downto 0) := (others => '0');
+    signal acc_multiply : std_logic_vector(3 downto 0) := (others => '0');
+    signal acc_scale    : std_logic_vector(1 downto 0) := (others => '0');
+    signal acc_update_l : std_logic_vector(4 downto 0) := (others => '0');
+    signal acc_update_r : std_logic_vector(4 downto 0) := (others => '0');
+    signal acc_output   : std_logic_vector(5 downto 0) := (others => '0');
+
+    signal mult_a_in    : signed(SAMPLE_WIDTH - 1 downto 0);
+    signal mult_b_in    : signed(SAMPLE_WIDTH - 1 downto 0);
+    signal mult_out     : signed(SAMPLE_WIDTH * 2 - 1 downto 0);
+    signal accumulator  : signed(ACCUMULATOR_WIDTH - 1 downto 0);
 
     -- For testing purposes
     signal channel_data_i : signed(SAMPLE_WIDTH - 1 downto 0);
@@ -221,7 +225,7 @@ begin
                             buffer_we <= '1';
                             channel_dav(i) <= '0';
                             -- This assume each buffer is aligned on a 2^BUFFER_WIDTH boundary
-                            wr_addr(i)(BUFFER_WIDTH(i) - 1 downto 0) <= wr_addr(i)(BUFFER_WIDTH(i) - 1 downto 0);
+                            wr_addr(i)(BUFFER_WIDTH(i) - 1 downto 0) <= wr_addr(i)(BUFFER_WIDTH(i) - 1 downto 0) + 1;
                         end if;
                     end loop;
                 end if;
@@ -234,18 +238,32 @@ begin
 
     -- Channel state machine
     process(clk)
+        variable tmp : unsigned(COEFF_A_WIDTH downto 0);
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                acc_reset <= '0';
+                --
                 if reset_n = '0' then
+                    acc_clear    <= (others => '0');
+                    acc_multiply <= (others => '0');
+                    acc_scale    <= (others => '0');
+                    acc_update_l <= (others => '0');
+                    acc_update_r <= (others => '0');
                     rate_counter <= (others => '1');
-                    state <= init;
+                    state        <= init;
                     for i in 0 to NUM_CHANNELS - 1 loop
-                        k(i) <= to_unsigned(0, COEFF_A_WIDTH);
+                        k(i) <= to_unsigned(0, COEFF_A_WIDTH + 1);
                         rd_addr(i) <= to_unsigned(BUFFER_BASE(i), BUFFER_A_WIDTH);
                     end loop;
                 else
+                    -- Control signals delayed to match the pipeline depth
+                    acc_clear    <= acc_clear   (   acc_clear'left - 1 downto 0) & '0';
+                    acc_multiply <= acc_multiply(acc_multiply'left - 1 downto 0) & '0';
+                    acc_scale    <= acc_scale   (   acc_scale'left - 1 downto 0) & '0';
+                    acc_update_l <= acc_update_l(acc_update_l'left - 1 downto 0) & '0';
+                    acc_update_r <= acc_update_r(acc_update_r'left - 1 downto 0) & '0';
+                    acc_output   <= acc_output  (  acc_output'left - 1 downto 0) & '0';
+                    -- When this reaches zero, it's time to start computing a new output sample
                     if rate_counter = 0 then
                         rate_counter <= to_unsigned(OUTPUT_RATE - 1, rate_counter'length);
                     else
@@ -255,27 +273,46 @@ begin
                         when idle =>
                             current_channel <= (others => '0');
                             if rate_counter = 0 then
+                                -- Output the current output sample
+                                acc_output(0) <= '1';
+                                -- Start calculating the next output sample
                                 state <= init;
                             end if;
                         when init =>
-                            coeff_ptr <= k(to_integer(current_channel));
-                            coeff_count <= to_unsigned(FILTER_NTAPS(to_integer(current_channel)), COEFF_A_WIDTH);
-                            acc_reset <= '1';
+                            coeff_index <= k(to_integer(current_channel));
+                            multiply_count <= to_unsigned(FILTER_NTAPS / FILTER_L(to_integer(current_channel)), COEFF_A_WIDTH);
+                            acc_clear(0) <= '1';
                             state <= calculate;
                         when calculate =>
                             buffer_rd_addr <= rd_addr(to_integer(current_channel));
-                            coeff_rom_addr <= COEFF_BASE + coeff_ptr;
-                            coeff_ptr  <= coeff_ptr + FILTER_L(to_integer(current_channel));
-                            coeff_count <= coeff_count - 1;
-                            if coeff_count = 0 then
+                            acc_multiply(0) <= '1';
+                            tmp := coeff_index;
+                            if tmp >= FILTER_NTAPS / 2 then
+                                tmp := FILTER_NTAPS - tmp;
+                            end if;
+                            coeff_rd_addr <= tmp(COEFF_A_WIDTH - 1 downto 0);
+                            coeff_index  <= coeff_index + FILTER_L(to_integer(current_channel));
+                            if multiply_count = 0 then
                                 state <= scale;
+                            else
+                                multiply_count <= multiply_count - 1;
                             end if;
                         when scale =>
+                            acc_scale(0) <= '1';
                             state <= transfer;
                         when transfer =>
+                            case(CHANNEL_TYPE(to_integer(current_channel))) is
+                                when left_channel =>
+                                    acc_update_l(0) <= '1';
+                                when right_channel =>
+                                    acc_update_r(0) <= '1';
+                                when mono =>
+                                    acc_update_l(0) <= '1';
+                                    acc_update_r(0) <= '1';
+                            end case;
                             k(to_integer(current_channel)) <= k(to_integer(current_channel)) + FILTER_M;
                             current_channel <= current_channel + 1;
-                            if current_channel = to_unsigned(NUM_CHANNELS - 1, current_channel'length) then
+                            if current_channel = NUM_CHANNELS - 1 then
                                 state <= idle;
                             else
                                 state <= init;
@@ -286,41 +323,68 @@ begin
         end if;
     end process;
 
-
-
-    -- DSP
-
+    -- DSP Multiply Accumulate
     process(clk)
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                if acc_reset = '1' then
-                    coefficient <= to_signed(0, coefficient'length);
-                    sample <= to_signed(0, sample'length);
-                    mult <= to_signed(0, mult'length);
+                if acc_clear(acc_clear'left) = '1' then
                     accumulator <= to_signed(0, accumulator'length);
+                elsif acc_multiply(acc_multiply'left) = '1' then
+                    accumulator <= accumulator + mult_out;
+                end if;
+                if acc_scale(acc_scale'left) = '1' then
+                    mult_a_in <= accumulator(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH);
+                    mult_b_in <= to_signed(FILTER_L(to_integer(current_channel)), SAMPLE_WIDTH);
                 else
-                    coefficient <= coeff_rom_data;
-                    sample <= buffer_rd_data;
-                    mult <= sample * coefficient;
-                    accumulator <= accumulator + mult;
+                    mult_a_in <= coeff_rd_data;
+                    mult_b_in <= buffer_rd_data;
+                end if;
+                mult_out <= mult_a_in * mult_b_in;
+            end if;
+        end if;
+    end process;
+
+    -- Output Mixer
+    process(clk)
+        -- Accumulate the samples for the various channels
+        variable tmp_l : signed(OUTPUT_WIDTH - 1 downto 0) := to_signed(0, OUTPUT_WIDTH);
+        variable tmp_r : signed(OUTPUT_WIDTH - 1 downto 0) := to_signed(0, OUTPUT_WIDTH);
+    begin
+        if rising_edge(clk) then
+            if clk_en = '1' then
+                --
+                if acc_update_l(acc_update_l'left) = '1' then
+                    tmp_l := tmp_l + accumulator(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH);
+                end if;
+                if acc_update_r(acc_update_r'left) = '1' then
+                    tmp_r := tmp_r + accumulator(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH);
+                end if;
+                if acc_output(acc_output'left) = '1' then
+                    mixer_l    <= tmp_l;
+                    mixer_r    <= tmp_r;
+                    mixer_load <= '1';
+                    tmp_l      := to_signed(0, OUTPUT_WIDTH);
+                    tmp_r      := to_signed(0, OUTPUT_WIDTH);
+                else
+                    mixer_load <= '0';
                 end if;
             end if;
         end if;
     end process;
 
-
-    -- Output Mixer
-
     -- Single Port Coefficient ROM
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if clk_en = '1' then
-                coeff_rom_data <= coeff_rom(to_integer(coeff_rom_addr));
-            end if;
-        end if;
-    end process;
+    inst_coeff_rom : entity work.coeff_rom
+        generic map (
+            A_WIDTH => COEFF_A_WIDTH,
+            D_WIDTH => SAMPLE_WIDTH
+            )
+        port map (
+            clk => clk,
+            clk_en => clk_en,
+            addr => coeff_rd_addr,
+            data => coeff_rd_data
+            );
 
     -- Dual Port Buffer RAM
     process(clk)
