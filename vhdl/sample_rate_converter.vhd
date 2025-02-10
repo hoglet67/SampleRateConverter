@@ -110,15 +110,17 @@ architecture rtl of sample_rate_converter is
     signal channel_dav : std_logic_vector(NUM_CHANNELS - 1 downto 0);
 
     -- A function that returns true if all bits of the SLV are zero, or the SLV is an empty slice
-    function all_bits_clear(slv : in std_logic_vector) return boolean is
+    function all_bits_clear(slv : in std_logic_vector; lo : integer; hi : integer) return boolean is
         variable ret : boolean;
     begin
         ret := true;
-        for i in slv'range loop
-            if slv(i) = '1' then
-                ret := false;
-            end if;
-        end loop;
+        if hi >= lo then
+            for i in lo to hi loop
+                if slv(i) = '1' then
+                    ret := false;
+                end if;
+            end loop;
+        end if;
         return ret;
     end function;
 
@@ -248,7 +250,7 @@ begin
                     -- Buffer writing
                     for i in 0 to NUM_CHANNELS - 1 loop
                         -- build a priority encode to serialize multiple simultaneous buffer writes
-                        if channel_dav(i) = '1' and all_bits_clear(channel_dav(i - 1 downto 0)) then
+                        if channel_dav(i) = '1' and all_bits_clear(channel_dav, 0, i - 1) then
                             buffer_wr_addr <= wr_addr(i);
                             buffer_wr_data <= channel_data(i);
                             buffer_we <= '1';
