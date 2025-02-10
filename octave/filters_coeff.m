@@ -6,14 +6,14 @@ close all;
 clear all;
 #clf;
 
-dB  = 60
-L = 147
-M = 320
-Fsin = 96000
+dB  = 84
+L = 96
+M = 125
+Fsin = 62500
 Fsimm1 = Fsin * L
 Fsout = Fsimm1 / M
 
-f1 = 20000
+f1 = 18000
 f2 = min(Fsin/2, Fsout/2)
 
 delta_f = f2 - f1;
@@ -34,7 +34,10 @@ hc = fir1(N-1, f,'low');
 freqz(hc,1,512,Fsimm1)
 
 # Scale coefficients to cope with gain loss due to interpolation
-hc = hc * L;
+#hc = hc * L;
+
+# Set the gain to the LCM of 6,24,128
+hc = hc * 384;
 
 hc_min = min(hc)
 hc_max = max(hc)
@@ -50,5 +53,3 @@ hc_sum = sum(hc)
 
 # Save to a file
 save hc.txt hc;
-
-
