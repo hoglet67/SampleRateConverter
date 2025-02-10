@@ -317,7 +317,7 @@ begin
                             end if;
                         when init =>
                             coeff_index <= k(to_integer(current_channel));
-                            multiply_count <= to_unsigned(FILTER_NTAPS / FILTER_L(to_integer(current_channel)), COEFF_A_WIDTH);
+                            multiply_count <= to_unsigned(FILTER_NTAPS / FILTER_L(to_integer(current_channel)) - 1, COEFF_A_WIDTH);
                             sample_addr <= rd_addr(to_integer(current_channel));
                             acc_clear(0) <= '1';
                             state <= calculate;
