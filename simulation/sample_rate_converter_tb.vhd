@@ -25,8 +25,8 @@ architecture Behavioral of sample_rate_converter_tb is
     signal psg_counter     : unsigned(11 downto 0) := (others => '0');
     signal m5k_counter     : unsigned(11 downto 0) := (others => '0');
 
-    -- Step input of from 0 to +/- 90% full scale value
-    constant step          : integer := (2 ** (sample_width - 1)) * 90 / 100;
+    -- Step input of from 0 to +/- 50% full scale value
+    constant step          : integer := (2 ** (sample_width - 1)) * 50 / 100;
 
     signal sid_audio       : signed(sample_width - 1 downto 0) := (others => '0');
     signal sid_audio_load  : std_logic := '0';
@@ -93,10 +93,12 @@ begin
                 --     end if;
                 -- end if;
                 if psg_audio_load <= '1' then
-                    if psg_counter(6) = '1' then -- 250KHz/128 = 1.9KHz
+--                    if psg_counter(6) = '1' then -- 250KHz/128 = 1.9KHz
+                    if psg_counter = 238-1 then
                         psg_audio <= to_signed(step, sample_width);
-                    else
+                    elsif psg_counter = 238*2-1 then
                         psg_audio <= to_signed(-step, sample_width);
+                        psg_counter <= (others => '0');
                     end if;
                 end if;
                 -- if m5k_audio_load <= '1' then
