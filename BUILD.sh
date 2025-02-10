@@ -2,14 +2,13 @@
 
 suffix=float.wav
 
-
-
 gcc -DTEST_VHDL src/test.c src/tinywav.c -o build/test
 
 mkdir -p build/vhdl
 
 for i in \
-    Square_1953Hz_90
+    Square_525Hz_6dB \
+    Square_1953Hz_6dB
 do
 
     infile=tests/vhdl/${i}_${suffix}
@@ -24,8 +23,6 @@ do
     fi
 
 done
-
-exit
 
 gcc -DTEST_250000_48000 src/test.c src/tinywav.c -o build/test
 
