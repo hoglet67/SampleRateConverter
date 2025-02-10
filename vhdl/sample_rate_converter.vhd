@@ -198,6 +198,7 @@ architecture rtl of sample_rate_converter is
     signal current_channel : unsigned(1 downto 0) := (others => '0'); -- should depend on NUM_CHANNELS!
     signal multiply_count : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
     signal coeff_index : unsigned(COEFF_A_WIDTH downto 0) := (others => '0');
+    signal sample_addr : unsigned(BUFFER_A_WIDTH - 1 downto 0) := (others => '0');
     signal rate_counter : unsigned(9 downto 0); -- TODO: determine width from output rate
 
     -- ------------------------------------------------------------------------------
@@ -284,7 +285,7 @@ begin
                     acc_update_l <= (others => '0');
                     acc_update_r <= (others => '0');
                     rate_counter <= (others => '1');
-                    state        <= init;
+                    state        <= idle;
                     for i in 0 to NUM_CHANNELS - 1 loop
                         k(i) <= to_unsigned(0, COEFF_A_WIDTH + 1);
                         rd_addr(i) <= to_unsigned(BUFFER_BASE(i), BUFFER_A_WIDTH);
@@ -317,18 +318,19 @@ begin
                         when init =>
                             coeff_index <= k(to_integer(current_channel));
                             multiply_count <= to_unsigned(FILTER_NTAPS / FILTER_L(to_integer(current_channel)), COEFF_A_WIDTH);
+                            sample_addr <= rd_addr(to_integer(current_channel));
                             acc_clear(0) <= '1';
-                            buffer_rd_addr <= rd_addr(to_integer(current_channel));
                             state <= calculate;
                         when calculate =>
-                            buffer_rd_addr(w - 1 downto 0) <= buffer_rd_addr(w - 1 downto 0) - 1;
-                            acc_multiply(0) <= '1';
+                            buffer_rd_addr <= sample_addr;
                             tmp_coeff := coeff_index;
                             if tmp_coeff >= FILTER_NTAPS / 2 then
                                 tmp_coeff := FILTER_NTAPS - 1 - tmp_coeff;
                             end if;
                             coeff_rd_addr <= tmp_coeff(COEFF_A_WIDTH - 1 downto 0);
+                            sample_addr(w - 1 downto 0) <= sample_addr(w - 1 downto 0) - 1;
                             coeff_index <= coeff_index + FILTER_L(to_integer(current_channel));
+                            acc_multiply(0) <= '1';
                             if multiply_count = 0 then
                                 state <= scale;
                             else
