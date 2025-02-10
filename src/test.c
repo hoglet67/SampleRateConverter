@@ -5,7 +5,16 @@
 //#define TEST_46875_48000
 //#define TEST_250000_48000
 //#define TEST_96000_44100
-#if defined(TEST_46875_48000)
+#if defined(TEST_VHDL)
+
+#include "coefficients_vhdl1.h"
+
+#define               L    24
+#define               M   125
+#define  IN_SAMPLE_RATE 250000
+#define OUT_SAMPLE_RATE 48000
+
+#elif defined(TEST_46875_48000)
 
 // LCM is 6MHz
 
@@ -153,10 +162,10 @@ int main(int argc, char **argv) {
    float *oleft = malloc(num_out_samples * sizeof(float));
    float *oright = malloc(num_out_samples * sizeof(float));
 
-   int min_in = 0;
-   int max_in = 0;
-   int min_out = 0;
-   int max_out = 0;
+   long min_in = 0;
+   long max_in = 0;
+   long min_out = 0;
+   long max_out = 0;
 
    for (int c = 0; c < 2; c++) {
 
@@ -175,9 +184,9 @@ int main(int argc, char **argv) {
       while (m < num_out_samples) {
 
          // Calculate the mth output sample
-         int sum = 0;
+         long sum = 0;
          for (int p = 0; p < NTAPS / L; p++) {
-            int d = (n - p) <= 0 ? 0 : ((int) (din[n - p] * WSCALE));
+            long d = (n - p) <= 0 ? 0 : ((long) (din[n - p] * WSCALE));
             if (d < min_in) {
                min_in = d;
             }
@@ -185,9 +194,12 @@ int main(int argc, char **argv) {
                max_in = d;
             }
             // Do the calculation in integer with a scale factor
-            sum += hc[p * L + k] * d;
+            sum += d * hc[p * L + k];
          }
          sum /= HSCALE;
+#ifdef TEST_VHDL
+         sum >>= 4;
+#endif
          if (sum < min_out) {
             min_out = sum;
          }
@@ -216,10 +228,10 @@ int main(int argc, char **argv) {
       }
    }
 
-   printf("min_in  = %d\n", min_in);
-   printf("max_in  = %d\n", max_in);
-   printf("min_out = %d\n", min_out);
-   printf("max_out = %d\n", max_out);
+   printf("min_in  = %ld\n", min_in);
+   printf("max_in  = %ld\n", max_in);
+   printf("min_out = %ld\n", min_out);
+   printf("max_out = %ld\n", max_out);
 
    // Write out the WAV file at the output sample rate
    write_wav(outfile, num_out_samples, stereo, oleft, oright);

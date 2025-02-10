@@ -3,6 +3,30 @@
 suffix=float.wav
 
 
+
+gcc -DTEST_VHDL src/test.c src/tinywav.c -o build/test
+
+mkdir -p build/vhdl
+
+for i in \
+    Square_1953Hz_90
+do
+
+    infile=tests/vhdl/${i}_${suffix}
+    outfile=build/vhdl/${i}_${suffix}
+    echo ${infile}
+    channels=1
+
+    if [ -f ${infile} ]; then
+        ./build/test ${infile} ${outfile} ${channels} 1000
+    else
+        echo "   ...skipping as file ${infile} not present"
+    fi
+
+done
+
+exit
+
 gcc -DTEST_250000_48000 src/test.c src/tinywav.c -o build/test
 
 mkdir -p build/250000
