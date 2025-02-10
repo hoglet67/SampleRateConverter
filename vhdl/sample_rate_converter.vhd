@@ -272,6 +272,7 @@ begin
         variable tmp_coeff : unsigned(COEFF_A_WIDTH downto 0);
         variable tmp_k     : unsigned(COEFF_A_WIDTH downto 0);
         variable tmp_i     : unsigned(BUFFER_A_WIDTH - 1 downto 0);
+        variable w         : integer;
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
@@ -289,6 +290,8 @@ begin
                         rd_addr(i) <= to_unsigned(BUFFER_BASE(i), BUFFER_A_WIDTH);
                     end loop;
                 else
+                    -- Precalculate w to save some typing
+                    w := BUFFER_WIDTH(to_integer(current_channel));
                     -- Control signals delayed to match the pipeline depth
                     acc_clear    <= acc_clear   (   acc_clear'left - 1 downto 0) & '0';
                     acc_multiply <= acc_multiply(acc_multiply'left - 1 downto 0) & '0';
@@ -315,10 +318,10 @@ begin
                             coeff_index <= k(to_integer(current_channel));
                             multiply_count <= to_unsigned(FILTER_NTAPS / FILTER_L(to_integer(current_channel)), COEFF_A_WIDTH);
                             acc_clear(0) <= '1';
+                            buffer_rd_addr <= rd_addr(to_integer(current_channel));
                             state <= calculate;
                         when calculate =>
-                            buffer_rd_addr <= rd_addr(to_integer(current_channel));
-                            -- This assume each buffer is aligned on a 2^BUFFER_WIDTH boundary
+                            buffer_rd_addr(w - 1 downto 0) <= buffer_rd_addr(w - 1 downto 0) - 1;
                             acc_multiply(0) <= '1';
                             tmp_coeff := coeff_index;
                             if tmp_coeff >= FILTER_NTAPS / 2 then
@@ -358,9 +361,7 @@ begin
                                 tmp_i := tmp_i + 1;
                             end if;
                             k(to_integer(current_channel)) <= tmp_k;
-                            rd_addr(to_integer(current_channel))(BUFFER_WIDTH(to_integer(current_channel)) - 1 downto 0) <=
-                                rd_addr(to_integer(current_channel))(BUFFER_WIDTH(to_integer(current_channel)) - 1 downto 0) +
-                                tmp_i(BUFFER_WIDTH(to_integer(current_channel)) - 1 downto 0);
+                            rd_addr(to_integer(current_channel))(w - 1 downto 0) <= rd_addr(to_integer(current_channel))(w - 1 downto 0) + tmp_i(w - 1 downto 0);
                             current_channel <= current_channel + 1;
                             if current_channel = NUM_CHANNELS - 1 then
                                 state <= idle;
@@ -384,7 +385,11 @@ begin
                     accumulator <= accumulator + mult_out;
                 end if;
                 if acc_scale(acc_scale'left) = '1' then
-                    mult_a_in <= accumulator(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH);
+                    -- HACK ALERT: The +6 is to avoid clipping because
+                    -- the filter has an effective gain of 384/L. We
+                    -- really need higher precision here, especially
+                    -- if we want an external volume control as well.
+                    mult_a_in <= accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
                     mult_b_in <= to_signed(FILTER_L(to_integer(current_channel)), SAMPLE_WIDTH);
                 else
                     mult_a_in <= coeff_rd_data;
@@ -401,12 +406,15 @@ begin
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                --
+                -- HACK ALERT: The +6 is to avoid clipping because
+                -- the filter has an effective gain of 384/L. We
+                -- really need higher precision here, especially
+                -- if we want an external volume control as well.
                 if acc_update_l(acc_update_l'left) = '1' then
-                    mixer_tmp_l <= mixer_tmp_l + accumulator(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH);
+                    mixer_tmp_l <= mixer_tmp_l + accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
                 end if;
                 if acc_update_r(acc_update_r'left) = '1' then
-                    mixer_tmp_r <= mixer_tmp_r + accumulator(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH);
+                    mixer_tmp_r <= mixer_tmp_r + accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
                 end if;
                 if acc_output(acc_output'left) = '1' then
                     mixer_l     <= mixer_tmp_l;
