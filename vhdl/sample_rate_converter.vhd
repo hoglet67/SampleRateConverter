@@ -52,7 +52,7 @@ entity sample_rate_converter is
         BUFFER_A_WIDTH    : integer;
         COEFF_A_WIDTH     : integer;
         ACCUMULATOR_WIDTH : integer;
-        BUFFER_WIDTH      : t_int_array
+        BUFFER_SIZE       : t_int_array
         );
     port (
         clk               : in  std_logic;
@@ -155,8 +155,8 @@ architecture rtl of sample_rate_converter is
     signal buffer_rd_data : signed(SAMPLE_WIDTH - 1 downto 0) := (others => '0');
     signal buffer_we      : std_logic := '0';
 
-    -- A function to initialize the base address of each buffer from the passed-in widths
-    function init_buffer_base(i_buffer_width : in t_int_array)
+    -- A function to initialize the base address of each buffer from the passed-in size
+    function init_buffer_base(i_buffer_size : in t_int_array)
         return t_int_array is
         variable tmp : t_int_array;
         variable sum : integer;
@@ -164,13 +164,13 @@ architecture rtl of sample_rate_converter is
         sum := 0;
         for i in 0 to NUM_CHANNELS - 1 loop
             tmp(i) := sum;
-            sum := sum + 2 ** i_buffer_width(i);
+            sum := sum + i_buffer_size(i);
         end loop;
         return tmp;
     end function;
 
     -- The base address of each buffer
-    constant BUFFER_BASE : t_int_array := init_buffer_base(BUFFER_WIDTH);
+    constant BUFFER_BASE : t_int_array := init_buffer_base(BUFFER_SIZE);
 
     -- Buffer read / write pointers
     type t_buffer_addr_array is array(0 to NUM_CHANNELS - 1)
@@ -257,7 +257,11 @@ begin
                             buffer_we <= '1';
                             channel_dav(i) <= '0';
                             -- This assume each buffer is aligned on a 2^BUFFER_WIDTH boundary
-                            wr_addr(i)(BUFFER_WIDTH(i) - 1 downto 0) <= wr_addr(i)(BUFFER_WIDTH(i) - 1 downto 0) + 1;
+                            if wr_addr(i) = BUFFER_BASE(i) + BUFFER_SIZE(i) - 1 then
+                                wr_addr(i) <= to_unsigned(BUFFER_BASE(i), BUFFER_A_WIDTH);
+                            else
+                                wr_addr(i) <= wr_addr(i) + 1;
+                            end if;
                         end if;
                     end loop;
                 end if;
@@ -270,10 +274,10 @@ begin
 
     -- Channel state machine
     process(clk)
-        variable tmp_coeff : unsigned(COEFF_A_WIDTH downto 0);
-        variable tmp_k     : unsigned(COEFF_A_WIDTH downto 0);
-        variable tmp_i     : unsigned(BUFFER_A_WIDTH - 1 downto 0);
-        variable w         : integer;
+        variable tmp_coeff  : unsigned(COEFF_A_WIDTH downto 0);
+        variable tmp_k      : unsigned(COEFF_A_WIDTH downto 0);
+        variable tmp_i      : unsigned(BUFFER_A_WIDTH - 1 downto 0);
+        variable buffer_end : integer;
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
@@ -292,7 +296,7 @@ begin
                     end loop;
                 else
                     -- Precalculate w to save some typing
-                    w := BUFFER_WIDTH(to_integer(current_channel));
+                    buffer_end := BUFFER_BASE(to_integer(current_channel)) + BUFFER_SIZE(to_integer(current_channel)) - 1;
                     -- Control signals delayed to match the pipeline depth
                     acc_clear    <= acc_clear   (   acc_clear'left - 1 downto 0) & '0';
                     acc_multiply <= acc_multiply(acc_multiply'left - 1 downto 0) & '0';
@@ -328,7 +332,11 @@ begin
                                 tmp_coeff := FILTER_NTAPS - 1 - tmp_coeff;
                             end if;
                             coeff_rd_addr <= tmp_coeff(COEFF_A_WIDTH - 1 downto 0);
-                            sample_addr(w - 1 downto 0) <= sample_addr(w - 1 downto 0) - 1;
+                            if sample_addr = BUFFER_BASE(to_integer(current_channel)) then
+                                sample_addr <= to_unsigned(buffer_end, BUFFER_A_WIDTH);
+                            else
+                                sample_addr <= sample_addr - 1;
+                            end if;
                             coeff_index <= coeff_index + FILTER_L(to_integer(current_channel));
                             acc_multiply(0) <= '1';
                             if multiply_count = 0 then
@@ -357,13 +365,16 @@ begin
                             --   n += (M / L);
                             -- }
                             tmp_k := k(to_integer(current_channel)) + M_MOD_L(to_integer(current_channel));
-                            tmp_i := to_unsigned(M_DIV_L(to_integer(current_channel)), BUFFER_A_WIDTH);
+                            tmp_i := rd_addr(to_integer(current_channel)) + to_unsigned(M_DIV_L(to_integer(current_channel)), BUFFER_A_WIDTH);
                             if tmp_k >= FILTER_L(to_integer(current_channel)) then
                                 tmp_k := tmp_k - FILTER_L(to_integer(current_channel));
                                 tmp_i := tmp_i + 1;
                             end if;
                             k(to_integer(current_channel)) <= tmp_k;
-                            rd_addr(to_integer(current_channel))(w - 1 downto 0) <= rd_addr(to_integer(current_channel))(w - 1 downto 0) + tmp_i(w - 1 downto 0);
+                            if tmp_i > buffer_end then
+                                tmp_i := tmp_i - BUFFER_SIZE(to_integer(current_channel));
+                            end if;
+                            rd_addr(to_integer(current_channel)) <= tmp_i;
                             current_channel <= current_channel + 1;
                             if current_channel = NUM_CHANNELS - 1 then
                                 state <= idle;
