@@ -620,18 +620,19 @@ begin
     --
     -- We currently do that by taking bits 35..16
     --
-    -- TODO: make the FILTER_GAIN (=384) a generic and calculate the bit slice
-    -- TODO: recalculate the filter with a FILTER_GAIN of 256
-    -- TODO: clip values that are too large
-
     -- If you use the left most bits when mapping mixer_sum to the
     -- final output then a input channel of 50% (+65536) with a FG of
     -- 384 and vol of 63 (25%) gives a final output of +3024 which is about 0.5%.
     --
     -- Extrapolating, an 100% input (+131072) FG of 256 and a vol of 256 would give
-    -- +16384 on a 20 bit signed output which is 1.5625 (1/64).
+    -- +16384 on a 20 bit signed output which is 3.125 (1/32).
     --
-    -- This suggest a final gain of 64 (a shift of 6 bits) is about right
+    -- This suggest a final gain of 32 (a shift of 5 bits) is about right
+    --
+    -- TODO: make the FILTER_GAIN (=384) a generic and calculate the bit slice
+    -- TODO: recalculate the filter with a FILTER_GAIN of 256
+    -- TODO: clip values that are too large
+    -- TODO: somehow calculate the shift value automatically
 
     process(clk)
     begin
@@ -642,8 +643,8 @@ begin
                         -- Use the left most bits when mapping mixer_sum
                         -- mixer_l     <= mixer_sum_l(mixer_sum_l'left downto mixer_sum_l'left - OUTPUT_WIDTH + 1);
                         -- mixer_r     <= mixer_sum_r(mixer_sum_r'left downto mixer_sum_r'left - OUTPUT_WIDTH + 1);
-                        mixer_l     <= mixer_sum_l(mixer_sum_l'left - 6  downto mixer_sum_l'left - 6 - OUTPUT_WIDTH + 1);
-                        mixer_r     <= mixer_sum_r(mixer_sum_l'left - 6  downto mixer_sum_l'left - 6 - OUTPUT_WIDTH + 1);
+                        mixer_l     <= mixer_sum_l(mixer_sum_l'left - 5  downto mixer_sum_l'left - 5 - OUTPUT_WIDTH + 1);
+                        mixer_r     <= mixer_sum_r(mixer_sum_l'left - 5  downto mixer_sum_l'left - 5 - OUTPUT_WIDTH + 1);
                         mixer_load  <= '1';
                     when others =>
                         mixer_load  <= '0';
