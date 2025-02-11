@@ -217,7 +217,7 @@ architecture rtl of sample_rate_converter is
         dsp_output
         );
 
-    type t_dsp_ctrl is array(0 to 5) of t_dsp_op;
+    type t_dsp_ctrl is array(0 to 4) of t_dsp_op;
 
     signal dsp_ctrl : t_dsp_ctrl  := (others => dsp_idle);
 
@@ -388,60 +388,9 @@ begin
         end if;
     end process;
 
-    -- DSP Multiply Accumulate
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if clk_en = '1' then
-                if dsp_ctrl(3) = dsp_clear then
-                    accumulator <= to_signed(0, accumulator'length);
-                elsif dsp_ctrl(3) = dsp_multiply then
-                    accumulator <= accumulator + mult_out;
-                end if;
-                if dsp_ctrl(1) = dsp_rescale then
-                    -- HACK ALERT: The +6 is to avoid clipping because
-                    -- the filter has an effective gain of 384/L. We
-                    -- really need higher precision here, especially
-                    -- if we want an external volume control as well.
-                    mult_a_in <= accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
-                    mult_b_in <= to_signed(FILTER_L(to_integer(current_channel)), SAMPLE_WIDTH);
-                else
-                    mult_a_in <= coeff_rd_data;
-                    mult_b_in <= buffer_rd_data;
-                end if;
-                mult_out <= mult_a_in * mult_b_in;
-            end if;
-        end if;
-    end process;
-
-    -- Output Mixer
-    -- Accumulate the samples for the various channels
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if clk_en = '1' then
-                -- HACK ALERT: The +6 is to avoid clipping because
-                -- the filter has an effective gain of 384/L. We
-                -- really need higher precision here, especially
-                -- if we want an external volume control as well.
-                if dsp_ctrl(4) = dsp_update_l or dsp_ctrl(4) = dsp_update_mono then
-                    mixer_tmp_l <= mixer_tmp_l + accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
-                end if;
-                if dsp_ctrl(4) = dsp_update_r or dsp_ctrl(4) = dsp_update_mono then
-                    mixer_tmp_r <= mixer_tmp_r + accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
-                end if;
-                if dsp_ctrl(5) = dsp_output then
-                    mixer_l     <= mixer_tmp_l;
-                    mixer_r     <= mixer_tmp_r;
-                    mixer_load  <= '1';
-                    mixer_tmp_l <= to_signed(0, OUTPUT_WIDTH);
-                    mixer_tmp_r <= to_signed(0, OUTPUT_WIDTH);
-                else
-                    mixer_load  <= '0';
-                end if;
-            end if;
-        end if;
-    end process;
+    ----------------------------------------------------------------------------------
+    -- DSP pipeline stage 0 : Block RAM
+    ----------------------------------------------------------------------------------
 
     -- Single Port Coefficient ROM
     inst_coeff_rom : entity work.coeff_rom
@@ -477,5 +426,91 @@ begin
         end if;
     end process;
 
+    ----------------------------------------------------------------------------------
+    -- DSP pipeline stage 1: Multiply input registes
+    ----------------------------------------------------------------------------------
+
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if clk_en = '1' then
+                if dsp_ctrl(1) = dsp_rescale then
+                    -- HACK ALERT: The +6 is to avoid clipping because
+                    -- the filter has an effective gain of 384/L. We
+                    -- really need higher precision here, especially
+                    -- if we want an external volume control as well.
+                    mult_a_in <= accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
+                    mult_b_in <= to_signed(FILTER_L(to_integer(current_channel)), SAMPLE_WIDTH);
+                else
+                    mult_a_in <= coeff_rd_data;
+                    mult_b_in <= buffer_rd_data;
+                end if;
+                mult_out <= mult_a_in * mult_b_in;
+            end if;
+        end if;
+    end process;
+
+    ----------------------------------------------------------------------------------
+    -- DSP pipeline stage 2 - 18x18 Multiply
+    ----------------------------------------------------------------------------------
+
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if clk_en = '1' then
+                mult_out <= mult_a_in * mult_b_in;
+            end if;
+        end if;
+    end process;
+
+    ----------------------------------------------------------------------------------
+    -- DSP pipeline stage 3 - 54 bit Sum (accumulating multiplies)
+    ----------------------------------------------------------------------------------
+
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if clk_en = '1' then
+                if dsp_ctrl(3) = dsp_clear then
+                    accumulator <= to_signed(0, accumulator'length);
+                elsif dsp_ctrl(3) = dsp_multiply then
+                    accumulator <= accumulator + mult_out;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    ----------------------------------------------------------------------------------
+    -- DSP pipeline stage 4 - Updating mixer output
+    ----------------------------------------------------------------------------------
+
+    -- Note: it might make sense to split this stage
+
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if clk_en = '1' then
+                -- HACK ALERT: The +6 is to avoid clipping because
+                -- the filter has an effective gain of 384/L. We
+                -- really need higher precision here, especially
+                -- if we want an external volume control as well.
+                if dsp_ctrl(4) = dsp_update_l or dsp_ctrl(4) = dsp_update_mono then
+                    mixer_tmp_l <= mixer_tmp_l + accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
+                end if;
+                if dsp_ctrl(4) = dsp_update_r or dsp_ctrl(4) = dsp_update_mono then
+                    mixer_tmp_r <= mixer_tmp_r + accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
+                end if;
+                if dsp_ctrl(4) = dsp_output then
+                    mixer_l     <= mixer_tmp_l;
+                    mixer_r     <= mixer_tmp_r;
+                    mixer_load  <= '1';
+                    mixer_tmp_l <= to_signed(0, OUTPUT_WIDTH);
+                    mixer_tmp_r <= to_signed(0, OUTPUT_WIDTH);
+                else
+                    mixer_load  <= '0';
+                end if;
+            end if;
+        end if;
+    end process;
 
 end architecture;
