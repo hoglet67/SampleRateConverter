@@ -205,13 +205,21 @@ architecture rtl of sample_rate_converter is
     -- DSP
     -- ------------------------------------------------------------------------------
 
-    -- Control signal delays to match data pipeline
-    signal acc_clear    : std_logic_vector(3 downto 0) := (others => '0');
-    signal acc_multiply : std_logic_vector(3 downto 0) := (others => '0');
-    signal acc_scale    : std_logic_vector(1 downto 0) := (others => '0');
-    signal acc_update_l : std_logic_vector(4 downto 0) := (others => '0');
-    signal acc_update_r : std_logic_vector(4 downto 0) := (others => '0');
-    signal acc_output   : std_logic_vector(5 downto 0) := (others => '0');
+
+    type t_dsp_op is (
+        dsp_idle,
+        dsp_clear,
+        dsp_multiply,
+        dsp_rescale,
+        dsp_update_l,
+        dsp_update_r,
+        dsp_update_mono,
+        dsp_output
+        );
+
+    type t_dsp_ctrl is array(0 to 5) of t_dsp_op;
+
+    signal dsp_ctrl : t_dsp_ctrl  := (others => dsp_idle);
 
     signal mult_a_in    : signed(SAMPLE_WIDTH - 1 downto 0);
     signal mult_b_in    : signed(SAMPLE_WIDTH - 1 downto 0);
@@ -283,11 +291,7 @@ begin
             if clk_en = '1' then
                 --
                 if reset_n = '0' then
-                    acc_clear    <= (others => '0');
-                    acc_multiply <= (others => '0');
-                    acc_scale    <= (others => '0');
-                    acc_update_l <= (others => '0');
-                    acc_update_r <= (others => '0');
+                    dsp_ctrl <= (others => dsp_idle);
                     rate_counter <= (others => '1');
                     state        <= idle;
                     for i in 0 to NUM_CHANNELS - 1 loop
@@ -298,12 +302,10 @@ begin
                     -- Precalculate w to save some typing
                     buffer_end := BUFFER_BASE(to_integer(current_channel)) + BUFFER_SIZE(to_integer(current_channel)) - 1;
                     -- Control signals delayed to match the pipeline depth
-                    acc_clear    <= acc_clear   (   acc_clear'left - 1 downto 0) & '0';
-                    acc_multiply <= acc_multiply(acc_multiply'left - 1 downto 0) & '0';
-                    acc_scale    <= acc_scale   (   acc_scale'left - 1 downto 0) & '0';
-                    acc_update_l <= acc_update_l(acc_update_l'left - 1 downto 0) & '0';
-                    acc_update_r <= acc_update_r(acc_update_r'left - 1 downto 0) & '0';
-                    acc_output   <= acc_output  (  acc_output'left - 1 downto 0) & '0';
+                    for i in dsp_ctrl'length - 1 downto 1 loop
+                        dsp_ctrl(i) <= dsp_ctrl(i - 1);
+                    end loop;
+                    dsp_ctrl(0) <= dsp_idle;
                     -- When this reaches zero, it's time to start computing a new output sample
                     if rate_counter = 0 then
                         rate_counter <= to_unsigned(OUTPUT_RATE - 1, rate_counter'length);
@@ -315,7 +317,7 @@ begin
                             current_channel <= (others => '0');
                             if rate_counter = 0 then
                                 -- Output the current output sample
-                                acc_output(0) <= '1';
+                                dsp_ctrl(0) <= dsp_output;
                                 -- Start calculating the next output sample
                                 state <= init;
                             end if;
@@ -323,7 +325,7 @@ begin
                             coeff_index <= k(to_integer(current_channel));
                             multiply_count <= to_unsigned(FILTER_NTAPS / FILTER_L(to_integer(current_channel)) - 1, COEFF_A_WIDTH);
                             sample_addr <= rd_addr(to_integer(current_channel));
-                            acc_clear(0) <= '1';
+                            dsp_ctrl(0) <= dsp_clear;
                             state <= calculate;
                         when calculate =>
                             buffer_rd_addr <= sample_addr;
@@ -338,24 +340,23 @@ begin
                                 sample_addr <= sample_addr - 1;
                             end if;
                             coeff_index <= coeff_index + FILTER_L(to_integer(current_channel));
-                            acc_multiply(0) <= '1';
+                            dsp_ctrl(0) <= dsp_multiply;
                             if multiply_count = 0 then
                                 state <= scale;
                             else
                                 multiply_count <= multiply_count - 1;
                             end if;
                         when scale =>
-                            acc_scale(0) <= '1';
+                            dsp_ctrl(0) <= dsp_rescale;
                             state <= transfer;
                         when transfer =>
                             case(CHANNEL_TYPE(to_integer(current_channel))) is
                                 when left_channel =>
-                                    acc_update_l(0) <= '1';
+                                    dsp_ctrl(0) <= dsp_update_l;
                                 when right_channel =>
-                                    acc_update_r(0) <= '1';
+                                    dsp_ctrl(0) <= dsp_update_r;
                                 when mono =>
-                                    acc_update_l(0) <= '1';
-                                    acc_update_r(0) <= '1';
+                                    dsp_ctrl(0) <= dsp_update_mono;
                             end case;
                             -- k += M % L;
                             -- if (k >= L) {
@@ -392,12 +393,12 @@ begin
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                if acc_clear(acc_clear'left) = '1' then
+                if dsp_ctrl(3) = dsp_clear then
                     accumulator <= to_signed(0, accumulator'length);
-                elsif acc_multiply(acc_multiply'left) = '1' then
+                elsif dsp_ctrl(3) = dsp_multiply then
                     accumulator <= accumulator + mult_out;
                 end if;
-                if acc_scale(acc_scale'left) = '1' then
+                if dsp_ctrl(1) = dsp_rescale then
                     -- HACK ALERT: The +6 is to avoid clipping because
                     -- the filter has an effective gain of 384/L. We
                     -- really need higher precision here, especially
@@ -423,13 +424,13 @@ begin
                 -- the filter has an effective gain of 384/L. We
                 -- really need higher precision here, especially
                 -- if we want an external volume control as well.
-                if acc_update_l(acc_update_l'left) = '1' then
+                if dsp_ctrl(4) = dsp_update_l or dsp_ctrl(4) = dsp_update_mono then
                     mixer_tmp_l <= mixer_tmp_l + accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
                 end if;
-                if acc_update_r(acc_update_r'left) = '1' then
+                if dsp_ctrl(4) = dsp_update_r or dsp_ctrl(4) = dsp_update_mono then
                     mixer_tmp_r <= mixer_tmp_r + accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
                 end if;
-                if acc_output(acc_output'left) = '1' then
+                if dsp_ctrl(5) = dsp_output then
                     mixer_l     <= mixer_tmp_l;
                     mixer_r     <= mixer_tmp_r;
                     mixer_load  <= '1';
