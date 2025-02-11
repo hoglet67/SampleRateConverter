@@ -141,10 +141,10 @@ begin
             FILTER_L          => (6, 24, 128, 128),
             FILTER_M          => 125,
             CHANNEL_TYPE      => (mono, mono, left_channel, right_channel),
-            BUFFER_A_WIDTH    => 10,             -- 1K Words
+            BUFFER_A_WIDTH    => 11,             -- 2K Words
             COEFF_A_WIDTH     => 11,             -- 2K Words
             ACCUMULATOR_WIDTH => 54,
-            BUFFER_WIDTH      => (9, 7, 5, 5)    -- powers of two
+            BUFFER_WIDTH      => (10, 8, 7, 7)    -- powers of two
             )
         port map (
             clk               => clk48,
