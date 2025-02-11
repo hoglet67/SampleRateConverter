@@ -8,7 +8,8 @@ use work.sample_rate_converter_pkg.all;
 entity sample_rate_converter_tb is
     generic (
         sample_width : integer := 18;
-        output_width : integer := 20
+        output_width : integer := 20;
+        test_tone    : integer := 525
     );
 end sample_rate_converter_tb;
 
@@ -86,25 +87,29 @@ begin
                     reset_n <= '1';
                 end if;
                 -- if sid_audio_load <= '1' then
-                --     if sid_counter(8) = '1' then -- 1MHz/512 = 1.9KHz
+                --     if sid_counter = 1000000 / test_tone / 2 - 1 then
                 --         sid_audio <= to_signed(step, sample_width);
-                --     else
+                --     elsif sid_counter = 1000000 / test_tone - 1 then
                 --         sid_audio <= to_signed(-step, sample_width);
+                --         sid_counter <= (others => '0');
                 --     end if;
                 -- end if;
                 if psg_audio_load <= '1' then
---                    if psg_counter(6) = '1' then -- 250KHz/128 = 1.9KHz
-                    if psg_counter = 238-1 then
+                    if psg_counter = 250000 / test_tone / 2 -1 then
                         psg_audio <= to_signed(step, sample_width);
-                    elsif psg_counter = 238*2-1 then
+                    elsif psg_counter = 250000 / test_tone - 1 then
                         psg_audio <= to_signed(-step, sample_width);
                         psg_counter <= (others => '0');
                     end if;
                 end if;
                 -- if m5k_audio_load <= '1' then
-                --     if m5k_counter = 4 then
+                --     if m5k_counter = 46875 / test_tone / 2 -1 then
                 --         m5k_audio_l <= to_signed(step, sample_width);
+                --         m5k_audio_r <= to_signed(step, sample_width);
+                --     elsif m5k_counter = 46875 / test_tone - 1 then
+                --         m5k_audio_l <= to_signed(-step, sample_width);
                 --         m5k_audio_r <= to_signed(-step, sample_width);
+                --         m5k_counter <= (others => '0');
                 --     end if;
                 -- end if;
             end if;
