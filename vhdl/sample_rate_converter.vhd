@@ -59,6 +59,9 @@ entity sample_rate_converter is
         clk_en            : in  std_logic := '1';
         reset_n           : in  std_logic;
 
+        -- Master volume
+        volume            : in  unsigned(7 downto 0);
+
         -- Input Channels
         channel_clken     : in  std_logic_vector(NUM_CHANNELS - 1 downto 0) := (others => '1');
         channel_load      : in  std_logic_vector(NUM_CHANNELS - 1 downto 0) := (others => '0');
@@ -188,13 +191,18 @@ architecture rtl of sample_rate_converter is
 
     type t_state_main is (
         idle,
-        init,
+        setup,
         calculate,
-        scale,
-        transfer
+        save,
+        stall1,
+        stall2,
+        stall3,
+        scale_lsb,
+        scale_msb,
+        complete
     );
 
-    signal state 	: 	t_state_main := init;
+    signal state 	: 	t_state_main := idle;
     signal current_channel : unsigned(1 downto 0) := (others => '0'); -- should depend on NUM_CHANNELS!
     signal multiply_count : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
     signal coeff_index : unsigned(COEFF_A_WIDTH downto 0) := (others => '0');
@@ -208,12 +216,15 @@ architecture rtl of sample_rate_converter is
 
     type t_dsp_op is (
         dsp_idle,
-        dsp_clear,
-        dsp_multiply,
-        dsp_rescale,
-        dsp_update_l,
-        dsp_update_r,
-        dsp_update_mono,
+        dsp_setup,
+        dsp_mult_accumulate,
+        dsp_save,
+        dsp_scale_lsb_l,
+        dsp_scale_lsb_r,
+        dsp_scale_lsb_mono,
+        dsp_scale_msb_l,
+        dsp_scale_msb_r,
+        dsp_scale_msb_mono,
         dsp_output
         );
 
@@ -221,21 +232,21 @@ architecture rtl of sample_rate_converter is
 
     signal dsp_ctrl : t_dsp_ctrl  := (others => dsp_idle);
 
-    signal mult_a_in    : signed(SAMPLE_WIDTH - 1 downto 0);
-    signal mult_b_in    : signed(SAMPLE_WIDTH - 1 downto 0);
-    signal mult_out     : signed(SAMPLE_WIDTH * 2 - 1 downto 0);
-    signal accumulator  : signed(ACCUMULATOR_WIDTH - 1 downto 0);
+    signal mult_a_in       : signed(SAMPLE_WIDTH - 1 downto 0);
+    signal mult_b_in       : signed(SAMPLE_WIDTH - 1 downto 0);
+    signal mult_out        : signed(SAMPLE_WIDTH * 2 - 1 downto 0);
+    signal accumulator     : signed(ACCUMULATOR_WIDTH - 1 downto 0);
+    signal channel_mag_lsb : signed(SAMPLE_WIDTH - 1 downto 0); -- will always hold a positive value
+    signal channel_mag_msb : signed(SAMPLE_WIDTH - 1 downto 0); -- will always hold a positive value
+    signal channel_sign    : std_logic;
+    signal scale_factor    : signed(SAMPLE_WIDTH - 1 downto 0);
+    signal mixer_sum_l     : signed(SAMPLE_WIDTH * 2 - 1 downto 0) := to_signed(0, SAMPLE_WIDTH * 2);
+    signal mixer_sum_r     : signed(SAMPLE_WIDTH * 2 - 1 downto 0) := to_signed(0, SAMPLE_WIDTH * 2);
 
-    signal mixer_tmp_l  : signed(OUTPUT_WIDTH - 1 downto 0) := to_signed(0, OUTPUT_WIDTH);
-    signal mixer_tmp_r  : signed(OUTPUT_WIDTH - 1 downto 0) := to_signed(0, OUTPUT_WIDTH);
-
-    -- For testing purposes
-    signal channel_data_i : signed(SAMPLE_WIDTH - 1 downto 0);
-
+    signal debug_state : std_logic_vector(3 downto 0);
 begin
 
-    -- For testing, a it's hard to see inside arrays
-    channel_data_i <= channel_data(to_integer(current_channel));
+    debug_state <= std_logic_vector(to_unsigned(t_state_main'pos(state), 4));
 
     process(clk)
     begin
@@ -319,13 +330,13 @@ begin
                                 -- Output the current output sample
                                 dsp_ctrl(0) <= dsp_output;
                                 -- Start calculating the next output sample
-                                state <= init;
+                                state <= setup;
                             end if;
-                        when init =>
+                        when setup =>
                             coeff_index <= k(to_integer(current_channel));
                             multiply_count <= to_unsigned(FILTER_NTAPS / FILTER_L(to_integer(current_channel)) - 1, COEFF_A_WIDTH);
                             sample_addr <= rd_addr(to_integer(current_channel));
-                            dsp_ctrl(0) <= dsp_clear;
+                            dsp_ctrl(0) <= dsp_setup;
                             state <= calculate;
                         when calculate =>
                             buffer_rd_addr <= sample_addr;
@@ -340,24 +351,42 @@ begin
                                 sample_addr <= sample_addr - 1;
                             end if;
                             coeff_index <= coeff_index + FILTER_L(to_integer(current_channel));
-                            dsp_ctrl(0) <= dsp_multiply;
+                            dsp_ctrl(0) <= dsp_mult_accumulate;
                             if multiply_count = 0 then
-                                state <= scale;
+                                state <= save;
                             else
                                 multiply_count <= multiply_count - 1;
                             end if;
-                        when scale =>
-                            dsp_ctrl(0) <= dsp_rescale;
-                            state <= transfer;
-                        when transfer =>
+                        when save =>
+                            dsp_ctrl(0) <= dsp_save;
+                            state <= stall1;
+                        when stall1 =>
+                            state <= stall2;
+                        when stall2 =>
+                            state <= stall3;
+                        when stall3 =>
+                            state <= scale_lsb;
+                        when scale_lsb =>
                             case(CHANNEL_TYPE(to_integer(current_channel))) is
                                 when left_channel =>
-                                    dsp_ctrl(0) <= dsp_update_l;
+                                    dsp_ctrl(0) <= dsp_scale_lsb_l;
                                 when right_channel =>
-                                    dsp_ctrl(0) <= dsp_update_r;
+                                    dsp_ctrl(0) <= dsp_scale_lsb_r;
                                 when mono =>
-                                    dsp_ctrl(0) <= dsp_update_mono;
+                                    dsp_ctrl(0) <= dsp_scale_lsb_mono;
                             end case;
+                            state <= scale_msb;
+                        when scale_msb =>
+                            case(CHANNEL_TYPE(to_integer(current_channel))) is
+                                when left_channel =>
+                                    dsp_ctrl(0) <= dsp_scale_msb_l;
+                                when right_channel =>
+                                    dsp_ctrl(0) <= dsp_scale_msb_r;
+                                when mono =>
+                                    dsp_ctrl(0) <= dsp_scale_msb_mono;
+                            end case;
+                            state <= complete;
+                        when complete =>
                             -- k += M % L;
                             -- if (k >= L) {
                             --   k -= L;
@@ -380,7 +409,7 @@ begin
                             if current_channel = NUM_CHANNELS - 1 then
                                 state <= idle;
                             else
-                                state <= init;
+                                state <= setup;
                             end if;
                      end case;
                  end if;
@@ -434,18 +463,24 @@ begin
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                if dsp_ctrl(1) = dsp_rescale then
-                    -- HACK ALERT: The +6 is to avoid clipping because
-                    -- the filter has an effective gain of 384/L. We
-                    -- really need higher precision here, especially
-                    -- if we want an external volume control as well.
-                    mult_a_in <= accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
-                    mult_b_in <= to_signed(FILTER_L(to_integer(current_channel)), SAMPLE_WIDTH);
-                else
-                    mult_a_in <= coeff_rd_data;
-                    mult_b_in <= buffer_rd_data;
-                end if;
-                mult_out <= mult_a_in * mult_b_in;
+                case dsp_ctrl(1) is
+                    when dsp_setup =>
+                        -- Calculate a scale factor that is volume(8 bits) * L
+                        mult_a_in <= to_signed(to_integer(volume), SAMPLE_WIDTH);
+                        mult_b_in <= to_signed(FILTER_L(to_integer(current_channel)), SAMPLE_WIDTH);
+                    when dsp_scale_lsb_l | dsp_scale_lsb_r | dsp_scale_lsb_mono =>
+                        -- Multiply the bottom half of the channel magnitude by the scale factor
+                        mult_a_in <= channel_mag_lsb;
+                        mult_b_in <= scale_factor;
+                    when dsp_scale_msb_l | dsp_scale_msb_r | dsp_scale_msb_mono =>
+                        -- Multiply the top half of the channel magnitude by the scale factor
+                        mult_a_in <= channel_mag_msb;
+                        mult_b_in <= scale_factor;
+                    when others =>
+                        -- Default to getting operand from the block RAMs
+                        mult_a_in <= coeff_rd_data;
+                        mult_b_in <= buffer_rd_data;
+                end case;
             end if;
         end if;
     end process;
@@ -464,50 +499,182 @@ begin
     end process;
 
     ----------------------------------------------------------------------------------
-    -- DSP pipeline stage 3 - 54 bit Sum (accumulating multiplies)
+    -- DSP pipeline stage 3a - Accumulator
     ----------------------------------------------------------------------------------
 
     process(clk)
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                if dsp_ctrl(3) = dsp_clear then
-                    accumulator <= to_signed(0, accumulator'length);
-                elsif dsp_ctrl(3) = dsp_multiply then
-                    accumulator <= accumulator + mult_out;
-                end if;
+                case dsp_ctrl(3) is
+                    when dsp_setup =>
+                        -- Clear the accumulator
+                        accumulator <= to_signed(0, accumulator'length);
+                    when dsp_mult_accumulate =>
+                        -- Accumulate the next Sample * Coefficient value
+                        accumulator <= accumulator + mult_out;
+                    when others => null;
+                end case;
             end if;
         end if;
     end process;
 
     ----------------------------------------------------------------------------------
-    -- DSP pipeline stage 4 - Updating mixer output
+    -- DSP pipeline stage 3b - calculate scale factor
     ----------------------------------------------------------------------------------
-
-    -- Note: it might make sense to split this stage
 
     process(clk)
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                -- HACK ALERT: The +6 is to avoid clipping because
-                -- the filter has an effective gain of 384/L. We
-                -- really need higher precision here, especially
-                -- if we want an external volume control as well.
-                if dsp_ctrl(4) = dsp_update_l or dsp_ctrl(4) = dsp_update_mono then
-                    mixer_tmp_l <= mixer_tmp_l + accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
-                end if;
-                if dsp_ctrl(4) = dsp_update_r or dsp_ctrl(4) = dsp_update_mono then
-                    mixer_tmp_r <= mixer_tmp_r + accumulator(SAMPLE_WIDTH * 2 - 1 + 6 downto SAMPLE_WIDTH + 6);
-                end if;
-                if dsp_ctrl(4) = dsp_output then
-                    mixer_l     <= mixer_tmp_l;
-                    mixer_r     <= mixer_tmp_r;
-                    mixer_load  <= '1';
-                    mixer_tmp_l <= to_signed(0, OUTPUT_WIDTH);
-                    mixer_tmp_r <= to_signed(0, OUTPUT_WIDTH);
-                else
-                    mixer_load  <= '0';
+                case dsp_ctrl(3) is
+                    when dsp_setup =>
+                        -- Save the volume * L scale factor
+                        scale_factor <= mult_out(SAMPLE_WIDTH - 1 downto 0);
+                    when others => null;
+                end case;
+            end if;
+        end if;
+    end process;
+
+    ----------------------------------------------------------------------------------
+    -- DSP pipeline stage 3c - mix the left channel
+    ----------------------------------------------------------------------------------
+
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if clk_en = '1' then
+                case dsp_ctrl(3) is
+                    when dsp_scale_lsb_l | dsp_scale_lsb_mono =>
+                        -- Update the mixer sum (left) with the LSB partial product result
+                        if channel_sign = '0' then
+                            mixer_sum_l <= mixer_sum_l + mult_out;
+                        else
+                            mixer_sum_l <= mixer_sum_l - mult_out;
+                        end if;
+                    when dsp_scale_msb_l | dsp_scale_msb_mono =>
+                        -- Update the mixer sum (left) with the MSB partial product result
+                        -- This needs scaling by 2**(SAMPLE_WIDTH-1)
+                        if channel_sign = '0' then
+                            mixer_sum_l(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) <=
+                            mixer_sum_l(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) + mult_out(SAMPLE_WIDTH - 1 downto 0);
+                        else
+                            mixer_sum_l(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) <=
+                            mixer_sum_l(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) - mult_out(SAMPLE_WIDTH - 1 downto 0);
+                        end if;
+                    when dsp_output =>
+                        mixer_sum_l <= to_signed(0, mixer_sum_l'length);
+                    when others => null;
+                end case;
+            end if;
+        end if;
+    end process;
+
+    ----------------------------------------------------------------------------------
+    -- DSP pipeline stage 3d - mix the right channel
+    ----------------------------------------------------------------------------------
+
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if clk_en = '1' then
+                case dsp_ctrl(3) is
+                    when dsp_scale_lsb_r | dsp_scale_lsb_mono =>
+                        -- Update the mixer sum (right) with the LSB partial product result
+                        if channel_sign = '0' then
+                            mixer_sum_r <= mixer_sum_r + mult_out;
+                        else
+                            mixer_sum_r <= mixer_sum_r - mult_out;
+                        end if;
+                    when dsp_scale_msb_r | dsp_scale_msb_mono =>
+                        -- Update the mixer sum (right) with the MSB partial product result
+                        -- This needs scaling by 2**(SAMPLE_WIDTH-1)
+                        if channel_sign = '0' then
+                            mixer_sum_r(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) <=
+                            mixer_sum_r(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) + mult_out(SAMPLE_WIDTH - 1 downto 0);
+                        else
+                            mixer_sum_r(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) <=
+                            mixer_sum_r(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) - mult_out(SAMPLE_WIDTH - 1 downto 0);
+                        end if;
+                    when dsp_output =>
+                        mixer_sum_r <= to_signed(0, mixer_sum_r'length);
+                    when others => null;
+                end case;
+            end if;
+        end if;
+    end process;
+
+    ----------------------------------------------------------------------------------
+    -- DSP pipeline stage 3e - update the output
+    ----------------------------------------------------------------------------------
+
+    -- Note: mixer_sum_l is 2 * SAMPLE_WIDTH bits wide (=36)
+    --
+    -- It contains a signed value that is the sum of all N (=4) channels
+    --
+    -- And each channel is 18-bit signed value that has been scaled by:
+    --     fixed filter gain (=384) * volume (0..255)
+    --
+    -- This now needs mapping to a final value that us OUTPUT_WIDTH (=20) bits wide
+    --
+    -- We currently do that by taking bits 35..16
+    --
+    -- TODO: make the FILTER_GAIN (=384) a generic and calculate the bit slice
+    -- TODO: recalculate the filter with a FILTER_GAIN of 256
+    -- TODO: clip values that are too large
+
+    -- If you use the left most bits when mapping mixer_sum to the
+    -- final output then a input channel of 50% (+65536) with a FG of
+    -- 384 and vol of 63 (25%) gives a final output of +3024 which is about 0.5%.
+    --
+    -- Extrapolating, an 100% input (+131072) FG of 256 and a vol of 256 would give
+    -- +16384 on a 20 bit signed output which is 1.5625 (1/64).
+    --
+    -- This suggest a final gain of 64 (a shift of 6 bits) is about right
+
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if clk_en = '1' then
+                case dsp_ctrl(3) is
+                    when dsp_output =>
+                        -- Use the left most bits when mapping mixer_sum
+                        -- mixer_l     <= mixer_sum_l(mixer_sum_l'left downto mixer_sum_l'left - OUTPUT_WIDTH + 1);
+                        -- mixer_r     <= mixer_sum_r(mixer_sum_r'left downto mixer_sum_r'left - OUTPUT_WIDTH + 1);
+                        mixer_l     <= mixer_sum_l(mixer_sum_l'left - 6  downto mixer_sum_l'left - 6 - OUTPUT_WIDTH + 1);
+                        mixer_r     <= mixer_sum_r(mixer_sum_l'left - 6  downto mixer_sum_l'left - 6 - OUTPUT_WIDTH + 1);
+                        mixer_load  <= '1';
+                    when others =>
+                        mixer_load  <= '0';
+                end case;
+            end if;
+        end if;
+    end process;
+
+    ----------------------------------------------------------------------------------
+    -- DSP pipeline stage 4 - save the filter result in sign/magnitude format
+    --
+    --
+    -- Note: this feeds back to stage 1, so the state machine must insert three
+    -- stall states before usimg the channel sum/magnitude values
+    ----------------------------------------------------------------------------------
+
+    process(clk)
+        variable tmp : signed(SAMPLE_WIDTH * 2 - 1 downto 0);
+    begin
+        if rising_edge(clk) then
+            if clk_en = '1' then
+                if dsp_ctrl(4) = dsp_save then
+                    tmp := accumulator(ACCUMULATOR_WIDTH - 1 downto SAMPLE_WIDTH);
+                    if tmp < 0 then
+                        channel_sign <= '1';
+                        tmp := -tmp;
+                    else
+                        channel_sign <= '0';
+                    end if;
+                    channel_mag_lsb <= signed("0" & std_logic_vector(tmp(SAMPLE_WIDTH     - 2 downto                0)));
+                    channel_mag_msb <= signed("0" & std_logic_vector(tmp(SAMPLE_WIDTH * 2 - 3 downto SAMPLE_WIDTH - 1)));
                 end if;
             end if;
         end if;

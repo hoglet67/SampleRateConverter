@@ -1,30 +1,22 @@
 [*]
 [*] GTKWave Analyzer v3.3.86 (w)1999-2017 BSI
-[*] Mon Feb 10 16:50:27 2025
+[*] Tue Feb 11 13:57:32 2025
 [*]
 [dumpfile] "/disk1/home/dmb/atom/SampleRateConverter/simulation/audio.vcd"
-[dumpfile_mtime] "Mon Feb 10 16:46:33 2025"
-[dumpfile_size] 52287683
+[dumpfile_mtime] "Tue Feb 11 13:51:11 2025"
+[dumpfile_size] 31088441
 [savefile] "/disk1/home/dmb/atom/SampleRateConverter/simulation/sample_rate_converter.gtkw"
-[timestart] 0
+[timestart] 73620000000
 [size] 1853 1145
 [pos] -1 -1
-*-37.000000 380700000000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+*-31.000000 77032515000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
 [treeopen] sample_rate_converter_tb.
 [treeopen] sample_rate_converter_tb.sample_rate_converter_inst.
 [sst_width] 223
-[signals_width] 214
+[signals_width] 246
 [sst_expanded] 1
 [sst_vpaned_height] 344
 @22
-sample_rate_converter_tb.sample_rate_converter_inst.acc_clear[3:0]
-sample_rate_converter_tb.sample_rate_converter_inst.acc_multiply[3:0]
-sample_rate_converter_tb.sample_rate_converter_inst.acc_output[5:0]
-@28
-sample_rate_converter_tb.sample_rate_converter_inst.acc_scale[1:0]
-@22
-sample_rate_converter_tb.sample_rate_converter_inst.acc_update_l[4:0]
-sample_rate_converter_tb.sample_rate_converter_inst.acc_update_r[4:0]
 sample_rate_converter_tb.sample_rate_converter_inst.accumulator[53:0]
 sample_rate_converter_tb.sample_rate_converter_inst.buffer_rd_addr[9:0]
 sample_rate_converter_tb.sample_rate_converter_inst.buffer_rd_data[17:0]
@@ -34,10 +26,12 @@ sample_rate_converter_tb.sample_rate_converter_inst.buffer_we
 sample_rate_converter_tb.sample_rate_converter_inst.buffer_wr_addr[9:0]
 sample_rate_converter_tb.sample_rate_converter_inst.buffer_wr_data[17:0]
 sample_rate_converter_tb.sample_rate_converter_inst.channel_clken[3:0]
-sample_rate_converter_tb.sample_rate_converter_inst.channel_data_i[17:0]
 sample_rate_converter_tb.sample_rate_converter_inst.channel_dav[3:0]
 sample_rate_converter_tb.sample_rate_converter_inst.channel_load[3:0]
+sample_rate_converter_tb.sample_rate_converter_inst.channel_mag_lsb[17:0]
+sample_rate_converter_tb.sample_rate_converter_inst.channel_mag_msb[17:0]
 @28
+sample_rate_converter_tb.sample_rate_converter_inst.channel_sign
 sample_rate_converter_tb.sample_rate_converter_inst.clk
 sample_rate_converter_tb.sample_rate_converter_inst.clk_en
 @22
@@ -47,11 +41,15 @@ sample_rate_converter_tb.sample_rate_converter_inst.coeff_rd_data[17:0]
 @28
 sample_rate_converter_tb.sample_rate_converter_inst.current_channel[1:0]
 @22
+sample_rate_converter_tb.sample_rate_converter_inst.debug_channel_mag_lsb[17:0]
+sample_rate_converter_tb.sample_rate_converter_inst.debug_channel_mag_msb[17:0]
 sample_rate_converter_tb.sample_rate_converter_inst.mixer_l[19:0]
 @28
 sample_rate_converter_tb.sample_rate_converter_inst.mixer_load
 @22
 sample_rate_converter_tb.sample_rate_converter_inst.mixer_r[19:0]
+sample_rate_converter_tb.sample_rate_converter_inst.mixer_sum_l[35:0]
+sample_rate_converter_tb.sample_rate_converter_inst.mixer_sum_r[35:0]
 sample_rate_converter_tb.sample_rate_converter_inst.mult_a_in[17:0]
 sample_rate_converter_tb.sample_rate_converter_inst.mult_b_in[17:0]
 sample_rate_converter_tb.sample_rate_converter_inst.mult_out[35:0]
@@ -60,18 +58,8 @@ sample_rate_converter_tb.sample_rate_converter_inst.rate_counter[9:0]
 @28
 sample_rate_converter_tb.sample_rate_converter_inst.reset_n
 @22
-sample_rate_converter_tb.psg_audio[17:0]
-@28
-sample_rate_converter_tb.psg_audio_load
-@22
-sample_rate_converter_tb.sid_audio[17:0]
-@28
-sample_rate_converter_tb.sid_audio_load
-@22
-sample_rate_converter_tb.m5k_audio_l[17:0]
-@28
-sample_rate_converter_tb.m5k_audio_load
-@22
-sample_rate_converter_tb.m5k_audio_r[17:0]
+sample_rate_converter_tb.sample_rate_converter_inst.sample_addr[9:0]
+sample_rate_converter_tb.sample_rate_converter_inst.scale_factor[17:0]
+sample_rate_converter_tb.sample_rate_converter_inst.volume[7:0]
 [pattern_trace] 1
 [pattern_trace] 0

@@ -149,6 +149,7 @@ begin
         port map (
             clk               => clk48,
             reset_n           => reset_n,
+            volume            => to_unsigned(63, 8),
             channel_clken     => channel_clken,
             channel_load      => channel_load,
             channel_in        => channel_in,
