@@ -7,3 +7,7 @@ audio.vcd
 work-obj93.cf
 *.plot
 *.log
+**/impl/pnr
+**/impl/gwsynthesis
+**/impl/temp
+*.gprj.user

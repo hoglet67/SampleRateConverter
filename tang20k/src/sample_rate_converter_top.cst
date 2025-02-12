@@ -1,0 +1,59 @@
+// System Clock (27MHz)
+IO_LOC  "sys_clk" 4;
+IO_PORT "sys_clk" IO_TYPE=LVCMOS33;
+
+// Button 1
+IO_LOC  "btn1" 88;
+IO_PORT "btn1" PULL_MODE=DOWN;
+
+// I2S Audio
+IO_LOC "i2s_bclk" 56;
+IO_PORT "i2s_bclk" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
+IO_LOC "i2s_lrclk" 55;
+IO_PORT "i2s_lrclk" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
+IO_LOC "i2s_din" 54;
+IO_PORT "i2s_din" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
+IO_LOC "pa_en" 51;
+IO_PORT "pa_en" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
+
+// Audio SPDIF Output
+IO_LOC "audio_spdif" 86;
+IO_PORT "audio_spdif" IO_TYPE=LVCMOS33;
+
+// Audio Load Output
+IO_LOC "audio_load" 49;
+IO_PORT "audio_load" IO_TYPE=LVCMOS33;
+
+// Audio PCM
+IO_LOC  "audio_pcm[15]" 75;
+IO_PORT "audio_pcm[15]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[14]" 85;
+IO_PORT "audio_pcm[14]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[13]" 77;
+IO_PORT "audio_pcm[13]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[12]" 15;
+IO_PORT "audio_pcm[12]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[11]" 16;
+IO_PORT "audio_pcm[11]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[10]" 27;
+IO_PORT "audio_pcm[10]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[9]" 28;
+IO_PORT "audio_pcm[9]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[8]" 25;
+IO_PORT "audio_pcm[8]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[7]" 26;
+IO_PORT "audio_pcm[7]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[6]" 29;
+IO_PORT "audio_pcm[6]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[5]" 30;
+IO_PORT "audio_pcm[5]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[4]" 31;
+IO_PORT "audio_pcm[4]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[3]" 17;
+IO_PORT "audio_pcm[3]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[2]" 20;
+IO_PORT "audio_pcm[2]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[1]" 19;
+IO_PORT "audio_pcm[1]" IO_TYPE=LVCMOS33;
+IO_LOC  "audio_pcm[0]" 18;
+IO_PORT "audio_pcm[0]" IO_TYPE=LVCMOS33;
