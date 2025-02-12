@@ -27,7 +27,7 @@ architecture Behavioral of sample_rate_converter_tb is
     signal m5k_counter     : unsigned(11 downto 0) := (others => '0');
 
     -- Step input of from 0 to +/- 50% full scale value
-    constant step          : integer := (2 ** (sample_width - 1)) * 50 / 100;
+    constant step          : integer := (2 ** (sample_width - 1)) * 95 / 100;
 
     signal sid_audio       : signed(sample_width - 1 downto 0) := (others => '0');
     signal sid_audio_load  : std_logic := '0';
@@ -149,12 +149,13 @@ begin
             BUFFER_A_WIDTH    => 10,             -- 1K Words
             COEFF_A_WIDTH     => 11,             -- 2K Words
             ACCUMULATOR_WIDTH => 54,
-            BUFFER_SIZE       => (700, 175, 40, 40)
+--            BUFFER_SIZE       => (700, 175, 40, 40)
+            BUFFER_SIZE       => (704, 192, 64, 64)
             )
         port map (
             clk               => clk48,
             reset_n           => reset_n,
-            volume            => to_unsigned(63, 8),
+            volume            => to_unsigned(64, 8),
             channel_clken     => channel_clken,
             channel_load      => channel_load,
             channel_in        => channel_in,
