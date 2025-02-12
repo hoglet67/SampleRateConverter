@@ -144,12 +144,8 @@ architecture rtl of sample_rate_converter is
     signal k : t_coeff_addr_array :=  (others => (others => '0'));
 
     -- ------------------------------------------------------------------------------
-    -- Buffer ROM
+    -- Buffer RAM
     -- ------------------------------------------------------------------------------
-
-    -- Buffer Block RAM
-    type t_buffer_ram is array(0 to 2**BUFFER_A_WIDTH - 1) of signed(SAMPLE_WIDTH - 1 downto 0);
-    shared variable buffer_ram : t_buffer_ram := (others => (others => '0'));
 
     -- Buffer RAM Ports
     signal buffer_wr_addr : unsigned(BUFFER_A_WIDTH - 1 downto 0) := (others => '0');
@@ -434,26 +430,22 @@ begin
             data => coeff_rd_data
             );
 
-    -- Dual Port Buffer RAM
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if clk_en = '1' then
-                if buffer_we = '1' then
-                    buffer_ram(to_integer(buffer_wr_addr)) := buffer_wr_data;
-                end if;
-            end if;
-        end if;
-    end process;
 
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if clk_en = '1' then
-                buffer_rd_data <= buffer_ram(to_integer(buffer_rd_addr));
-            end if;
-        end if;
-    end process;
+    -- Dual Port Buffer RAM
+    inst_buffer_ram : entity work.buffer_ram
+        generic map (
+            A_WIDTH => BUFFER_A_WIDTH,
+            D_WIDTH => SAMPLE_WIDTH
+            )
+        port map (
+            clk => clk,
+            clk_en => clk_en,
+            we => buffer_we,
+            wr_addr => buffer_wr_addr,
+            wr_data => buffer_wr_data,
+            rd_addr => buffer_rd_addr,
+            rd_data => buffer_rd_data
+            );
 
     ----------------------------------------------------------------------------------
     -- DSP pipeline stage 1: Multiply input registes
