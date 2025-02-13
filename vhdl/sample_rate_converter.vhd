@@ -497,15 +497,13 @@ begin
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                case dsp_ctrl(3) is
-                    when dsp_setup =>
-                        -- Clear the accumulator
-                        accumulator <= to_signed(0, accumulator'length);
-                    when dsp_mult_accumulate =>
-                        -- Accumulate the next Sample * Coefficient value
-                        accumulator <= accumulator + mult_out;
-                    when others => null;
-                end case;
+                if dsp_ctrl(3) = dsp_setup then
+                    -- Clear the accumulator
+                    accumulator <= to_signed(0, accumulator'length);
+                elsif dsp_ctrl(3) = dsp_mult_accumulate then
+                    -- Accumulate the next Sample * Coefficient value
+                    accumulator <= accumulator + mult_out;
+                end if;
             end if;
         end if;
     end process;
@@ -518,12 +516,10 @@ begin
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                case dsp_ctrl(3) is
-                    when dsp_setup =>
-                        -- Save the volume * L scale factor
-                        scale_factor <= mult_out(SAMPLE_WIDTH - 1 downto 0);
-                    when others => null;
-                end case;
+                if dsp_ctrl(3) = dsp_setup then
+                    -- Save the volume * L scale factor
+                    scale_factor <= mult_out(SAMPLE_WIDTH - 1 downto 0);
+                end if;
             end if;
         end if;
     end process;
