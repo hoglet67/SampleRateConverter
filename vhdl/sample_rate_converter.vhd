@@ -244,50 +244,49 @@ begin
 
     debug_state <= std_logic_vector(to_unsigned(t_state_main'pos(state), 4));
 
+    ----------------------------------------------------------------------------------
+    -- Channel input latches and buffer writing
+    ----------------------------------------------------------------------------------
+
     process(clk)
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                if reset_n = '0' then
-                    for i in 0 to NUM_CHANNELS - 1 loop
+                buffer_we <= '0';
+                for i in 0 to NUM_CHANNELS - 1 loop
+                    if reset_n = '0' then
                         wr_addr(i) <= to_unsigned(BUFFER_BASE(i) + RD_WR_OFFSET, BUFFER_A_WIDTH);
                         channel_dav(i) <= '0';
                         channel_data(i) <= to_signed(0, SAMPLE_WIDTH);
-                    end loop;
-                else
-                    -- Latch the channel input sample as soon as it appears
-                    for i in 0 to NUM_CHANNELS - 1 loop
-                        if channel_clken(i) = '1' and channel_load(i) = '1' and channel_dav(i) = '0' then
+                    else
+                        -- Latch the channel input sample as soon as it appears
+                        if channel_dav(i) = '0' and channel_clken(i) = '1' and channel_load(i) = '1' then
                             channel_dav(i) <= '1';
                             channel_data(i) <= channel_in(i);
                         end if;
-                    end loop;
-                    buffer_we <= '0';
-                    -- Buffer writing
-                    for i in 0 to NUM_CHANNELS - 1 loop
                         -- build a priority encode to serialize multiple simultaneous buffer writes
                         if channel_dav(i) = '1' and all_bits_clear(channel_dav, 0, i - 1) then
                             buffer_wr_addr <= wr_addr(i);
                             buffer_wr_data <= channel_data(i);
                             buffer_we <= '1';
                             channel_dav(i) <= '0';
-                            -- This assume each buffer is aligned on a 2^BUFFER_WIDTH boundary
+                            -- Buffers no longer have any alignment constraints
                             if wr_addr(i) = BUFFER_BASE(i) + BUFFER_SIZE(i) - 1 then
                                 wr_addr(i) <= to_unsigned(BUFFER_BASE(i), BUFFER_A_WIDTH);
                             else
                                 wr_addr(i) <= wr_addr(i) + 1;
                             end if;
                         end if;
-                    end loop;
-                end if;
+                    end if;
+                end loop;
             end if;
         end if;
     end process;
 
-
-
-
+    ----------------------------------------------------------------------------------
     -- Channel state machine
+    ----------------------------------------------------------------------------------
+
     process(clk)
         variable tmp_coeff  : unsigned(COEFF_A_WIDTH downto 0);
         variable tmp_k      : unsigned(COEFF_A_WIDTH downto 0);
