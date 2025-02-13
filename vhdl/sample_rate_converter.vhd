@@ -323,9 +323,11 @@ begin
     ----------------------------------------------------------------------------------
 
     process(clk)
+        -- One extra bit, as these are unreflected indexes
         variable tmp_coeff  : unsigned(COEFF_A_WIDTH downto 0);
         variable tmp_k      : unsigned(COEFF_A_WIDTH downto 0);
-        variable tmp_n      : unsigned(BUFFER_A_WIDTH - 1 downto 0);
+        -- One extra bit, so wrap calculation works at end of buffer
+        variable tmp_n      : unsigned(BUFFER_A_WIDTH downto 0);
         variable buffer_end : integer;
     begin
         if rising_edge(clk) then
@@ -424,7 +426,7 @@ begin
                             --     n += (M / L);
                             --   }
                             tmp_k := k(to_integer(current_channel)) + M_MOD_L(to_integer(current_channel));
-                            tmp_n := rd_addr(to_integer(current_channel)) + to_unsigned(M_DIV_L(to_integer(current_channel)), BUFFER_A_WIDTH);
+                            tmp_n := "0" & (rd_addr(to_integer(current_channel)) + to_unsigned(M_DIV_L(to_integer(current_channel)), BUFFER_A_WIDTH));
                             if tmp_k >= FILTER_L(to_integer(current_channel)) then
                                 tmp_k := tmp_k - FILTER_L(to_integer(current_channel));
                                 tmp_n := tmp_n + 1;
@@ -434,7 +436,7 @@ begin
                             if tmp_n > buffer_end then
                                 tmp_n := tmp_n - BUFFER_SIZE(to_integer(current_channel));
                             end if;
-                            rd_addr(to_integer(current_channel)) <= tmp_n;
+                            rd_addr(to_integer(current_channel)) <= tmp_n(BUFFER_A_WIDTH - 1 downto 0);
                             -- Move on to the next channel, or loop back to idle if done
                             if current_channel = NUM_CHANNELS - 1 then
                                 current_channel <= (others => '0');
