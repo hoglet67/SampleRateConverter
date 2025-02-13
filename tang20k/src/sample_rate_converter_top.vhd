@@ -8,9 +8,9 @@ use work.sample_rate_converter_pkg.all;
 entity sample_rate_converter_top is
     generic (
         sample_width : integer := 18;
-        output_width : integer := 20;
-        test_tone    : integer := 525;
-        test_level   : integer := 2047
+        output_width : integer := 20
+--        test_tone    : integer := 525;
+--        test_level   : integer := 2047
         );
     port (
         sys_clk         : in    std_logic;
@@ -75,23 +75,30 @@ architecture rtl of sample_rate_converter_top is
     end component;
 
     signal clk48           : std_logic;
-    signal powerup_reset_n : std_logic;
+    signal powerup_reset_n : std_logic := '0';
     signal reset_counter   : unsigned(10 downto 0) := (others => '0');
-    signal div8_counter    : unsigned(2 downto 0) := (others => '0'); -- for 6MHz
-    signal div24_counter   : unsigned(4 downto 0) := (others => '0'); -- for 250KHz
+    signal div12_counter   : unsigned(23 downto 0) := (others => '0'); -- for 4MHz
+    signal mhz4_clken      : std_logic := '0';
 
-    signal psg_counter     : unsigned(11 downto 0) := (others => '0');
+    -- Directly from PSG
+    signal sound_ao_pcm    : unsigned(13 downto 0); -- 14 bit signed
+    signal sound_strobe    : std_logic;
+
+    -- Massaged into out format
     signal psg_audio       : signed(sample_width - 1 downto 0) := (others => '0');
-    signal psg_audio_load  : std_logic := '0';
+    signal psg_strobe      : std_logic := '0';
 
-    signal mixer_l         : signed(output_width - 1 downto 0);
-    signal mixer_r         : signed(output_width - 1 downto 0);
-    signal mixer_load      : std_logic := '0';
-
+    -- Resampler inputs
     signal channel_in      : t_sample_array;
     signal channel_clken   : std_logic_vector(NUM_CHANNELS - 1 downto 0);
     signal channel_load    : std_logic_vector(NUM_CHANNELS - 1 downto 0);
 
+    -- Resampler outputs
+    signal mixer_l         : signed(output_width - 1 downto 0);
+    signal mixer_r         : signed(output_width - 1 downto 0);
+    signal mixer_load      : std_logic := '0';
+
+    -- Copy of final output
     signal audio_pcm_int   : std_logic_vector(15 downto 0);
 
 begin
@@ -139,27 +146,40 @@ begin
     process(clk48)
     begin
         if rising_edge(clk48) then
-            psg_audio_load <= '0';
-            div8_counter <= div8_counter + 1;
-            if div8_counter = 0 then
-                div24_counter <= div24_counter + 1;
-                if div24_counter = 23 then
-                    div24_counter <= (others => '0');
-                    psg_audio_load <= '1'; -- 48MHz / 8 / 24 = 250MHz; blip for just one cycle!
-                    psg_counter <= psg_counter + 1;
-                    if psg_counter = 250000 / test_tone - 1 then
-                        psg_counter <= (others => '0');
-                        psg_audio <= to_signed(-test_level, sample_width);
-                    elsif psg_counter = 250000 / test_tone / 2 - 1 then
-                        psg_audio <= to_signed(test_level, sample_width);
-                    end if;
-                end if;
+            div12_counter <= div12_counter + 1;
+            if div12_counter = 11 then
+                div12_counter <= (others => '0');
+                mhz4_clken <= '1';
+            else
+                mhz4_clken <= '0';
             end if;
         end if;
     end process;
 
+--------------------------------------------------------
+-- SN76489 Sound Generator
+--------------------------------------------------------
+
+
+    sound : entity work.sn76489_audio
+        port  map (
+            clk_i => clk48,
+            en_clk_psg_i => mhz4_clken,
+            reset_n_i => powerup_reset_n,
+            data_i => (others => '0'),
+            wr_n_i => '1',
+            ce_n_i => '0',
+            mix_audio_o => open,
+            pcm14s_o => sound_ao_pcm,
+            strobe_o => sound_strobe
+            );
+
+    -- External ports
+    psg_audio  <= signed((17 downto 14 => sound_ao_pcm(13)) & sound_ao_pcm);
+    psg_strobe <= sound_strobe and mhz4_clken;
+
     channel_clken <= "1111";
-    channel_load  <= "00" & psg_audio_load & "0";
+    channel_load  <= "00" & psg_strobe & "0";
     channel_in    <= (to_signed(0, sample_width), psg_audio, to_signed(0, sample_width), to_signed(0, sample_width));
 
     sample_rate_converter_inst : entity work.sample_rate_converter
