@@ -9,7 +9,8 @@ entity sample_rate_converter_top is
     generic (
         sample_width : integer := 18;
         output_width : integer := 20;
-        test_tone    : integer := 525
+        test_tone    : integer := 525;
+        test_level   : integer := 2047
         );
     port (
         sys_clk         : in    std_logic;
@@ -76,16 +77,13 @@ architecture rtl of sample_rate_converter_top is
     signal clk48           : std_logic;
     signal powerup_reset_n : std_logic;
     signal reset_counter   : unsigned(10 downto 0) := (others => '0');
-    signal div8_counter    : unsigned(2 downto 0) := (others => '0');
+    signal div8_counter    : unsigned(2 downto 0) := (others => '0'); -- for 6MHz
     signal div24_counter   : unsigned(4 downto 0) := (others => '0'); -- for 250KHz
-    signal clk6_en         : std_logic := '0';
+
     signal psg_counter     : unsigned(11 downto 0) := (others => '0');
     signal psg_audio       : signed(sample_width - 1 downto 0) := (others => '0');
-
-    -- Step input of from 0 to +/- 25% full scale value
-    constant step          : integer := (2 ** (sample_width - 1)) * 10 / 100;
-
     signal psg_audio_load  : std_logic := '0';
+
     signal mixer_l         : signed(output_width - 1 downto 0);
     signal mixer_r         : signed(output_width - 1 downto 0);
     signal mixer_load      : std_logic := '0';
@@ -95,9 +93,6 @@ architecture rtl of sample_rate_converter_top is
     signal channel_load    : std_logic_vector(NUM_CHANNELS - 1 downto 0);
 
     signal audio_pcm_int   : std_logic_vector(15 downto 0);
-
-    signal test           : signed(17 downto 0) := to_signed(8000, 18);
-    signal test_ctr       : unsigned(15 downto 0) := (others => '0');
 
 begin
 
@@ -141,56 +136,31 @@ begin
         end if;
     end process;
 
-
     process(clk48)
     begin
         if rising_edge(clk48) then
-            if clk6_en = '1' then
-                if test_ctr = 6000000 / 525 / 2 - 1 then
-                    test <= -test;
-                    test_ctr <= (others => '0');
-                else
-                    test_ctr <= test_ctr + 1;
-                end if;
-            end if;
-        end if;
-    end process;
-
-    process(clk48)
-    begin
-        if rising_edge(clk48) then
-            if div8_counter = 7 then
-                div8_counter <= (others => '0');
-                clk6_en <= '1';
-            else
-                div8_counter <= div8_counter + to_unsigned(1, div8_counter'length);
-                clk6_en <= '0';
-            end if;
-            if clk6_en = '1' then
+            psg_audio_load <= '0';
+            div8_counter <= div8_counter + 1;
+            if div8_counter = 0 then
+                div24_counter <= div24_counter + 1;
                 if div24_counter = 23 then
                     div24_counter <= (others => '0');
-                    psg_audio_load <= '1';
+                    psg_audio_load <= '1'; -- 48MHz / 8 / 24 = 250MHz; blip for just one cycle!
                     psg_counter <= psg_counter + 1;
-                else
-                    div24_counter <= div24_counter + 1;
-                    psg_audio_load <= '0';
-                end if;
-                if psg_audio_load <= '1' then
-                    if psg_counter = 250000 / test_tone / 2 -1 then
-                        psg_audio <= to_signed(step, sample_width);
-                    elsif psg_counter = 250000 / test_tone - 1 then
-                        psg_audio <= to_signed(-step, sample_width);
+                    if psg_counter = 250000 / test_tone - 1 then
                         psg_counter <= (others => '0');
+                        psg_audio <= to_signed(-test_level, sample_width);
+                    elsif psg_counter = 250000 / test_tone / 2 - 1 then
+                        psg_audio <= to_signed(test_level, sample_width);
                     end if;
                 end if;
             end if;
         end if;
     end process;
 
-    channel_clken <= clk6_en & clk6_en & clk6_en & clk6_en;
+    channel_clken <= "1111";
     channel_load  <= "00" & psg_audio_load & "0";
-    channel_in    <= (
-        to_signed(0, sample_width), test, to_signed(0, sample_width), to_signed(0, sample_width));
+    channel_in    <= (to_signed(0, sample_width), psg_audio, to_signed(0, sample_width), to_signed(0, sample_width));
 
     sample_rate_converter_inst : entity work.sample_rate_converter
         generic map (
@@ -203,7 +173,6 @@ begin
             BUFFER_A_WIDTH    => 10,             -- 1K Words
             COEFF_A_WIDTH     => 11,             -- 2K Words
             ACCUMULATOR_WIDTH => 54,
---            BUFFER_SIZE       => (700, 175, 40, 40)
             BUFFER_SIZE       => (704, 192, 64, 64)
             )
         port map (
