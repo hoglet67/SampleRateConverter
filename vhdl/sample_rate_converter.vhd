@@ -106,10 +106,10 @@ architecture rtl of sample_rate_converter is
     -- Input Data Latches
     -- ------------------------------------------------------------------------------
 
-    -- A single register to capture input data before it's writtem to the RAM
+    -- A sample register (per channel) to capture input data before it's written to the RAM
     signal channel_data : t_sample_array;
 
-    -- A register to indicate data is pending on the channel
+    -- A register with a bit per channel to indicate data is pending on that channel
     signal channel_dav : std_logic_vector(NUM_CHANNELS - 1 downto 0);
 
     -- A function that returns true if all bits of the SLV are zero, or the SLV is an empty slice
@@ -128,33 +128,38 @@ architecture rtl of sample_rate_converter is
     end function;
 
     -- ------------------------------------------------------------------------------
-    -- Coefficient ROM
+    -- Filter Coefficient ROM
     -- ------------------------------------------------------------------------------
 
-    -- Coefficient Block ROM
+    -- Note: as the filter coefficients are symettric, only half are stored
 
-    -- Coefficient ROM Ports
+    -- Coefficient ROM address and data ports
     signal coeff_rd_addr : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
     signal coeff_rd_data : signed(SAMPLE_WIDTH - 1 downto 0) := (others => '0');
 
-    -- Coefficient Pointers
+    -- Coefficient address (per channel) used during the filter calculation
     type t_coeff_addr_array is array(0 to NUM_CHANNELS - 1)
         of unsigned(COEFF_A_WIDTH downto 0);
 
+    -- It's called k to match the variable in the C code
     signal k : t_coeff_addr_array :=  (others => (others => '0'));
 
     -- ------------------------------------------------------------------------------
     -- Buffer RAM
     -- ------------------------------------------------------------------------------
 
-    -- Buffer RAM Ports
+    -- Note: the buffer RAM holds a circular buffer (per channel) to
+    -- store the recent history of channel input values. These are
+    -- used in the filter calculation.
+
+    -- Buffer RAM Ports address and data ports and the write enable signal
     signal buffer_wr_addr : unsigned(BUFFER_A_WIDTH - 1 downto 0) := (others => '0');
     signal buffer_rd_addr : unsigned(BUFFER_A_WIDTH - 1 downto 0) := (others => '0');
     signal buffer_wr_data : signed(SAMPLE_WIDTH - 1 downto 0) := (others => '0');
     signal buffer_rd_data : signed(SAMPLE_WIDTH - 1 downto 0) := (others => '0');
     signal buffer_we      : std_logic := '0';
 
-    -- A function to initialize the base address of each buffer from the passed-in size
+    -- A function to initialize the base address of each buffer from the passed-in sizes
     function init_buffer_base(i_buffer_size : in t_int_array)
         return t_int_array is
         variable tmp : t_int_array;
@@ -186,63 +191,93 @@ architecture rtl of sample_rate_converter is
     -- ------------------------------------------------------------------------------
 
     type t_state_main is (
-        idle,
-        setup,
-        calculate,
-        save,
-        stall1,
-        stall2,
-        stall3,
-        scale_lsb,
-        scale_msb,
-        complete
-    );
-
-    signal state 	: 	t_state_main := idle;
-    signal current_channel : unsigned(1 downto 0) := (others => '0'); -- should depend on NUM_CHANNELS!
-    signal multiply_count : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
-    signal coeff_index : unsigned(COEFF_A_WIDTH downto 0) := (others => '0');
-    signal sample_addr : unsigned(BUFFER_A_WIDTH - 1 downto 0) := (others => '0');
-    signal rate_counter : unsigned(9 downto 0); -- TODO: determine width from output rate
-
-    -- ------------------------------------------------------------------------------
-    -- DSP
-    -- ------------------------------------------------------------------------------
-
-
-    type t_dsp_op is (
-        dsp_idle,
-        dsp_setup,
-        dsp_mult_accumulate,
-        dsp_save,
-        dsp_scale_lsb_l,
-        dsp_scale_lsb_r,
-        dsp_scale_lsb_mono,
-        dsp_scale_msb_l,
-        dsp_scale_msb_r,
-        dsp_scale_msb_mono,
-        dsp_output
+        st_idle,
+        st_output,
+        st_setup,
+        st_mult_accumulate,
+        st_save,
+        st_stall1,
+        st_stall2,
+        st_stall3,
+        st_scale_lsb,
+        st_scale_msb,
+        st_complete
         );
 
-    type t_dsp_ctrl is array(0 to 4) of t_dsp_op;
+    -- Main (currently only) state machine
+    signal state 	         : t_state_main := st_idle;
 
-    signal dsp_ctrl : t_dsp_ctrl  := (others => dsp_idle);
+    -- Counter to iterate through the channels
+    signal current_channel : unsigned(1 downto 0) := (others => '0'); -- should depend on NUM_CHANNELS!
 
+    -- Counter to track the number of multiplies in the filter calculation (i.e. the number of taps)
+    signal multiply_count  : unsigned(COEFF_A_WIDTH - 1 downto 0) := (others => '0');
+
+    -- Temporary coefficient index that's updated as the filter calculation proceedes
+    -- Note: It's got one extra bit as it represents the unreflected coefficient index
+    signal coeff_index     : unsigned(COEFF_A_WIDTH downto 0) := (others => '0');
+
+    -- Temporary buffer rd address that's updated as the filter calculation proceedes
+    signal sample_addr     : unsigned(BUFFER_A_WIDTH - 1 downto 0) := (others => '0');
+
+    -- Counter to deterime when the next output sample is due
+    signal rate_counter    : unsigned(9 downto 0); -- TODO: determine width from output rate
+
+    -- ------------------------------------------------------------------------------
+    -- DSP Pipeline
+    -- ------------------------------------------------------------------------------
+
+    -- The DSP pipeline is controlled delayed versions of the main state
+    type t_pipe_state is array(0 to 4) of t_state_main;
+    signal pipe_state : t_pipe_state  := (others => st_idle);
+
+    -- Various other small state variable flow down the pipleline as well
+    type t_pipe_channel is array(0 to 4) of unsigned (1 downto 0);
+    signal pipe_channel : t_pipe_channel := (others => (others => '0'));
+
+    -- The DSP multiplier input/output registers
     signal mult_a_in       : signed(SAMPLE_WIDTH - 1 downto 0);
     signal mult_b_in       : signed(SAMPLE_WIDTH - 1 downto 0);
     signal mult_out        : signed(SAMPLE_WIDTH * 2 - 1 downto 0);
+
+    -- The DSP accumulator output register
     signal accumulator     : signed(ACCUMULATOR_WIDTH - 1 downto 0);
+
+    -- A snapshot of the final channel value after the filter
+    -- calculation is complete. It's in sign and magnitude format so a
+    -- 2*SAMPLE_WIDTH x SAMPLE_WIDTH multiple can be done with the
+    -- single multiplier over two cycles.
     signal channel_mag_lsb : signed(SAMPLE_WIDTH - 1 downto 0); -- will always hold a positive value
     signal channel_mag_msb : signed(SAMPLE_WIDTH - 1 downto 0); -- will always hold a positive value
     signal channel_sign    : std_logic;
+
+    -- A snapshot of the channel scale value (L * volume) calculated
+    -- during the setup state.
     signal scale_factor    : signed(SAMPLE_WIDTH - 1 downto 0);
+
+    -- The mixer sum, calculated across the N channels
     signal mixer_sum_l     : signed(SAMPLE_WIDTH * 2 - 1 downto 0) := to_signed(0, SAMPLE_WIDTH * 2);
     signal mixer_sum_r     : signed(SAMPLE_WIDTH * 2 - 1 downto 0) := to_signed(0, SAMPLE_WIDTH * 2);
 
-    signal debug_state : std_logic_vector(3 downto 0);
+    -- For debugging (in a simulation)
+    signal debug_state   : std_logic_vector(3 downto 0);
+    signal debug_state0  : std_logic_vector(3 downto 0);
+    signal debug_state1  : std_logic_vector(3 downto 0);
+    signal debug_state2  : std_logic_vector(3 downto 0);
+    signal debug_state3  : std_logic_vector(3 downto 0);
+    signal debug_state4  : std_logic_vector(3 downto 0);
 begin
 
-    debug_state <= std_logic_vector(to_unsigned(t_state_main'pos(state), 4));
+    ----------------------------------------------------------------------------------
+    -- Debugging (in a simulation)
+    ----------------------------------------------------------------------------------
+
+    debug_state  <= std_logic_vector(to_unsigned(t_state_main'pos(state ), 4));
+    debug_state0 <= std_logic_vector(to_unsigned(t_state_main'pos(pipe_state(0)), 4));
+    debug_state1 <= std_logic_vector(to_unsigned(t_state_main'pos(pipe_state(1)), 4));
+    debug_state2 <= std_logic_vector(to_unsigned(t_state_main'pos(pipe_state(2)), 4));
+    debug_state3 <= std_logic_vector(to_unsigned(t_state_main'pos(pipe_state(3)), 4));
+    debug_state4 <= std_logic_vector(to_unsigned(t_state_main'pos(pipe_state(4)), 4));
 
     ----------------------------------------------------------------------------------
     -- Channel input latches and buffer writing
@@ -284,34 +319,28 @@ begin
     end process;
 
     ----------------------------------------------------------------------------------
-    -- Channel state machine
+    -- Main state machine
     ----------------------------------------------------------------------------------
 
     process(clk)
         variable tmp_coeff  : unsigned(COEFF_A_WIDTH downto 0);
         variable tmp_k      : unsigned(COEFF_A_WIDTH downto 0);
-        variable tmp_i      : unsigned(BUFFER_A_WIDTH - 1 downto 0);
+        variable tmp_n      : unsigned(BUFFER_A_WIDTH - 1 downto 0);
         variable buffer_end : integer;
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                --
                 if reset_n = '0' then
-                    dsp_ctrl <= (others => dsp_idle);
-                    rate_counter <= (others => '1');
-                    state        <= idle;
+                    rate_counter <= (others => '1'); -- TODO: is this delay necessary?
+                    state <= st_idle;
+                    current_channel <= (others => '0');
                     for i in 0 to NUM_CHANNELS - 1 loop
                         k(i) <= to_unsigned(0, COEFF_A_WIDTH + 1);
                         rd_addr(i) <= to_unsigned(BUFFER_BASE(i), BUFFER_A_WIDTH);
                     end loop;
                 else
-                    -- Precalculate w to save some typing
+                    -- Precalculate the end of the current channel buffer; used for wrapping
                     buffer_end := BUFFER_BASE(to_integer(current_channel)) + BUFFER_SIZE(to_integer(current_channel)) - 1;
-                    -- Control signals delayed to match the pipeline depth
-                    for i in dsp_ctrl'length - 1 downto 1 loop
-                        dsp_ctrl(i) <= dsp_ctrl(i - 1);
-                    end loop;
-                    dsp_ctrl(0) <= dsp_idle;
                     -- When this reaches zero, it's time to start computing a new output sample
                     if rate_counter = 0 then
                         rate_counter <= to_unsigned(OUTPUT_RATE - 1, rate_counter'length);
@@ -319,96 +348,125 @@ begin
                         rate_counter <= rate_counter - 1;
                     end if;
                     case state is
-                        when idle =>
-                            current_channel <= (others => '0');
+                        when st_idle =>
+                            -- This state wait until the output sample is due
                             if rate_counter = 0 then
-                                -- Output the current output sample
-                                dsp_ctrl(0) <= dsp_output;
-                                -- Start calculating the next output sample
-                                state <= setup;
+                                state <= st_output;
                             end if;
-                        when setup =>
+                        when st_output =>
+                            -- This state triggers the outputs to be updated with the new values
+                            state <= st_setup;
+                        when st_setup =>
+                            -- This state sets up the FIR filter calculation
                             coeff_index <= k(to_integer(current_channel));
                             multiply_count <= to_unsigned(FILTER_NTAPS / FILTER_L(to_integer(current_channel)) - 1, COEFF_A_WIDTH);
                             sample_addr <= rd_addr(to_integer(current_channel));
-                            dsp_ctrl(0) <= dsp_setup;
-                            state <= calculate;
-                        when calculate =>
-                            buffer_rd_addr <= sample_addr;
+                            state <= st_mult_accumulate;
+                        when st_mult_accumulate =>
+                            -- Reflect the coefficient (the filter is symettric)
                             tmp_coeff := coeff_index;
                             if tmp_coeff >= FILTER_NTAPS / 2 then
                                 tmp_coeff := FILTER_NTAPS - 1 - tmp_coeff;
                             end if;
+                            -- Update the Coeff ROM/Buffer RAM read addresses
                             coeff_rd_addr <= tmp_coeff(COEFF_A_WIDTH - 1 downto 0);
+                            buffer_rd_addr <= sample_addr;
+                            -- Decrement the sample address (moving earlier in time)
+                            -- handling wrapping from the buffer start back to the buffer end
                             if sample_addr = BUFFER_BASE(to_integer(current_channel)) then
                                 sample_addr <= to_unsigned(buffer_end, BUFFER_A_WIDTH);
                             else
                                 sample_addr <= sample_addr - 1;
                             end if;
+                            -- Increment the filter index by L (this doesn't neet to wrap)
                             coeff_index <= coeff_index + FILTER_L(to_integer(current_channel));
-                            dsp_ctrl(0) <= dsp_mult_accumulate;
+                            -- Decrement the multiply loop counter
                             if multiply_count = 0 then
-                                state <= save;
+                                state <= st_save;
                             else
                                 multiply_count <= multiply_count - 1;
                             end if;
-                        when save =>
-                            dsp_ctrl(0) <= dsp_save;
-                            state <= stall1;
-                        when stall1 =>
-                            state <= stall2;
-                        when stall2 =>
-                            state <= stall3;
-                        when stall3 =>
-                            state <= scale_lsb;
-                        when scale_lsb =>
-                            case(CHANNEL_TYPE(to_integer(current_channel))) is
-                                when left_channel =>
-                                    dsp_ctrl(0) <= dsp_scale_lsb_l;
-                                when right_channel =>
-                                    dsp_ctrl(0) <= dsp_scale_lsb_r;
-                                when mono =>
-                                    dsp_ctrl(0) <= dsp_scale_lsb_mono;
-                            end case;
-                            state <= scale_msb;
-                        when scale_msb =>
-                            case(CHANNEL_TYPE(to_integer(current_channel))) is
-                                when left_channel =>
-                                    dsp_ctrl(0) <= dsp_scale_msb_l;
-                                when right_channel =>
-                                    dsp_ctrl(0) <= dsp_scale_msb_r;
-                                when mono =>
-                                    dsp_ctrl(0) <= dsp_scale_msb_mono;
-                            end case;
-                            state <= complete;
-                        when complete =>
-                            -- k += M % L;
-                            -- if (k >= L) {
-                            --   k -= L;
-                            --   n += (M / L) + 1;
-                            -- } else {
-                            --   n += (M / L);
-                            -- }
+                        when st_save =>
+                            -- This state reads the filter result (in
+                            -- the accumulator) and saves it in sign
+                            -- and magnitude format);
+                            state <= st_stall1;
+                        when st_stall1 =>
+                            -- We now need to stall the pipline for a
+                            -- few cycles before the final scalimg of
+                            -- the channel.
+                            state <= st_stall2;
+                        when st_stall2 =>
+                            state <= st_stall3;
+                        when st_stall3 =>
+                            state <= st_scale_lsb;
+                        when st_scale_lsb =>
+                            -- Calculate the least significant half of
+                            -- the scaled filter result. Scaling is by
+                            -- L * Volume.
+                            state <= st_scale_msb;
+                        when st_scale_msb =>
+                            -- Calculate the most significant half of
+                            -- the scaled filter result.
+                            state <= st_complete;
+                        when st_complete =>
+                            -- This state updates the channel phase
+                            -- k(i) and the buffer read pointer
+                            -- rd_addr(i) ready for computing the next
+                            -- sample.
+                            --
+                            -- It's equivalent to the following C code:
+                            --   k += M % L;
+                            --   if (k >= L) {
+                            --     k -= L;
+                            --     n += (M / L) + 1;
+                            --   } else {
+                            --     n += (M / L);
+                            --   }
                             tmp_k := k(to_integer(current_channel)) + M_MOD_L(to_integer(current_channel));
-                            tmp_i := rd_addr(to_integer(current_channel)) + to_unsigned(M_DIV_L(to_integer(current_channel)), BUFFER_A_WIDTH);
+                            tmp_n := rd_addr(to_integer(current_channel)) + to_unsigned(M_DIV_L(to_integer(current_channel)), BUFFER_A_WIDTH);
                             if tmp_k >= FILTER_L(to_integer(current_channel)) then
                                 tmp_k := tmp_k - FILTER_L(to_integer(current_channel));
-                                tmp_i := tmp_i + 1;
+                                tmp_n := tmp_n + 1;
                             end if;
                             k(to_integer(current_channel)) <= tmp_k;
-                            if tmp_i > buffer_end then
-                                tmp_i := tmp_i - BUFFER_SIZE(to_integer(current_channel));
+                            -- Handle wrapping
+                            if tmp_n > buffer_end then
+                                tmp_n := tmp_n - BUFFER_SIZE(to_integer(current_channel));
                             end if;
-                            rd_addr(to_integer(current_channel)) <= tmp_i;
-                            current_channel <= current_channel + 1;
+                            rd_addr(to_integer(current_channel)) <= tmp_n;
+                            -- Move on to the next channel, or loop back to idle if done
                             if current_channel = NUM_CHANNELS - 1 then
-                                state <= idle;
+                                current_channel <= (others => '0');
+                                state <= st_idle;
                             else
-                                state <= setup;
+                                current_channel <= current_channel + 1;
+                                state <= st_setup;
                             end if;
+                        when others =>
+                            state <= st_idle;
                      end case;
                  end if;
             end if;
+        end if;
+    end process;
+
+    ----------------------------------------------------------------------------------
+    -- DSP pipeline control
+    ----------------------------------------------------------------------------------
+
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            -- Control signals delayed to match the pipeline depth
+            for i in pipe_state'high downto pipe_state'low + 1 loop
+                pipe_state(i) <= pipe_state(i - 1);
+            end loop;
+            pipe_state(pipe_state'low) <= state;
+            for i in pipe_channel'high downto pipe_channel'low + 1 loop
+                pipe_channel(i) <= pipe_channel(i - 1);
+            end loop;
+            pipe_channel(pipe_channel'low) <= current_channel;
         end if;
     end process;
 
@@ -447,23 +505,23 @@ begin
             );
 
     ----------------------------------------------------------------------------------
-    -- DSP pipeline stage 1: Multiply input registes
+    -- DSP pipeline stage 1: Multiply operand selection
     ----------------------------------------------------------------------------------
 
     process(clk)
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                case dsp_ctrl(1) is
-                    when dsp_setup =>
+                case pipe_state(1) is
+                    when st_setup =>
                         -- Calculate a scale factor that is volume(8 bits) * L
                         mult_a_in <= to_signed(to_integer(volume), SAMPLE_WIDTH);
                         mult_b_in <= to_signed(FILTER_L(to_integer(current_channel)), SAMPLE_WIDTH);
-                    when dsp_scale_lsb_l | dsp_scale_lsb_r | dsp_scale_lsb_mono =>
+                    when st_scale_lsb =>
                         -- Multiply the bottom half of the channel magnitude by the scale factor
                         mult_a_in <= channel_mag_lsb;
                         mult_b_in <= scale_factor;
-                    when dsp_scale_msb_l | dsp_scale_msb_r | dsp_scale_msb_mono =>
+                    when st_scale_msb =>
                         -- Multiply the top half of the channel magnitude by the scale factor
                         mult_a_in <= channel_mag_msb;
                         mult_b_in <= scale_factor;
@@ -493,14 +551,16 @@ begin
     -- DSP pipeline stage 3a - Accumulator
     ----------------------------------------------------------------------------------
 
+    -- Note: all the different stage 3 consume the multipler output
+
     process(clk)
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                if dsp_ctrl(3) = dsp_setup then
+                if pipe_state(3) = st_setup then
                     -- Clear the accumulator
                     accumulator <= to_signed(0, accumulator'length);
-                elsif dsp_ctrl(3) = dsp_mult_accumulate then
+                elsif pipe_state(3) = st_mult_accumulate then
                     -- Accumulate the next Sample * Coefficient value
                     accumulator <= accumulator + mult_out;
                 end if;
@@ -509,14 +569,14 @@ begin
     end process;
 
     ----------------------------------------------------------------------------------
-    -- DSP pipeline stage 3b - calculate scale factor
+    -- DSP pipeline stage 3b - Calculate scale factor
     ----------------------------------------------------------------------------------
 
     process(clk)
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                if dsp_ctrl(3) = dsp_setup then
+                if pipe_state(3) = st_setup then
                     -- Save the volume * L scale factor
                     scale_factor <= mult_out(SAMPLE_WIDTH - 1 downto 0);
                 end if;
@@ -525,75 +585,54 @@ begin
     end process;
 
     ----------------------------------------------------------------------------------
-    -- DSP pipeline stage 3c - mix the left channel
+    -- DSP pipeline stage 3c - Mix the channel into the left/right sums
     ----------------------------------------------------------------------------------
 
     process(clk)
+        variable tmp_type  : t_channel_type;
+        variable tmp_value : signed(SAMPLE_WIDTH * 2 - 1 downto 0);
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                case dsp_ctrl(3) is
-                    when dsp_scale_lsb_l | dsp_scale_lsb_mono =>
-                        -- Update the mixer sum (left) with the LSB partial product result
-                        if channel_sign = '0' then
-                            mixer_sum_l <= mixer_sum_l + mult_out;
-                        else
-                            mixer_sum_l <= mixer_sum_l - mult_out;
+                -- Extract the channel type into a variable
+                tmp_type := CHANNEL_TYPE(to_integer(pipe_channel(3)));
+                -- The multipler result is the channel magnitue * scale factor; both are positive
+                tmp_value := mult_out;
+                if channel_sign = '1' then
+                    tmp_value := -tmp_value;
+                end if;
+                case pipe_state(3) is
+                    when st_scale_lsb =>
+                        -- Update the mixer sum with the LSB partial product result
+                        if tmp_type = left_channel or tmp_type = mono then
+                            mixer_sum_l <= mixer_sum_l + tmp_value;
                         end if;
-                    when dsp_scale_msb_l | dsp_scale_msb_mono =>
-                        -- Update the mixer sum (left) with the MSB partial product result
+                        if tmp_type = right_channel or tmp_type = mono then
+                            mixer_sum_r <= mixer_sum_r + tmp_value;
+                        end if;
+                    when st_scale_msb =>
+                        -- Update the mixer sum with the MSB partial product result
                         -- This needs scaling by 2**(SAMPLE_WIDTH-1)
-                        if channel_sign = '0' then
+                        if tmp_type = left_channel or tmp_type = mono then
                             mixer_sum_l(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) <=
-                            mixer_sum_l(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) + mult_out(SAMPLE_WIDTH - 1 downto 0);
-                        else
-                            mixer_sum_l(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) <=
-                            mixer_sum_l(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) - mult_out(SAMPLE_WIDTH - 1 downto 0);
+                                mixer_sum_l(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) + tmp_value(SAMPLE_WIDTH - 1 downto 0);
                         end if;
-                    when dsp_output =>
+                        if tmp_type = right_channel or tmp_type = mono then
+                            mixer_sum_r(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) <=
+                                mixer_sum_r(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) + tmp_value(SAMPLE_WIDTH - 1 downto 0);
+                        end if;
+                    when st_output =>
                         mixer_sum_l <= to_signed(0, mixer_sum_l'length);
-                    when others => null;
-                end case;
-            end if;
-        end if;
-    end process;
-
-    ----------------------------------------------------------------------------------
-    -- DSP pipeline stage 3d - mix the right channel
-    ----------------------------------------------------------------------------------
-
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if clk_en = '1' then
-                case dsp_ctrl(3) is
-                    when dsp_scale_lsb_r | dsp_scale_lsb_mono =>
-                        -- Update the mixer sum (right) with the LSB partial product result
-                        if channel_sign = '0' then
-                            mixer_sum_r <= mixer_sum_r + mult_out;
-                        else
-                            mixer_sum_r <= mixer_sum_r - mult_out;
-                        end if;
-                    when dsp_scale_msb_r | dsp_scale_msb_mono =>
-                        -- Update the mixer sum (right) with the MSB partial product result
-                        -- This needs scaling by 2**(SAMPLE_WIDTH-1)
-                        if channel_sign = '0' then
-                            mixer_sum_r(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) <=
-                            mixer_sum_r(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) + mult_out(SAMPLE_WIDTH - 1 downto 0);
-                        else
-                            mixer_sum_r(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) <=
-                            mixer_sum_r(SAMPLE_WIDTH * 2 - 1 downto SAMPLE_WIDTH - 1) - mult_out(SAMPLE_WIDTH - 1 downto 0);
-                        end if;
-                    when dsp_output =>
                         mixer_sum_r <= to_signed(0, mixer_sum_r'length);
-                    when others => null;
+                    when others =>
+                        -- hold the currentt value
                 end case;
             end if;
         end if;
     end process;
 
     ----------------------------------------------------------------------------------
-    -- DSP pipeline stage 3e - update the output
+    -- DSP pipeline stage 3d - update the outputs
     ----------------------------------------------------------------------------------
 
     -- Note: mixer_sum_l is 2 * SAMPLE_WIDTH bits wide (=36)
@@ -625,35 +664,37 @@ begin
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                case dsp_ctrl(3) is
-                    when dsp_output =>
-                        -- Use the left most bits when mapping mixer_sum
-                        -- mixer_l     <= mixer_sum_l(mixer_sum_l'left downto mixer_sum_l'left - OUTPUT_WIDTH + 1);
-                        -- mixer_r     <= mixer_sum_r(mixer_sum_r'left downto mixer_sum_r'left - OUTPUT_WIDTH + 1);
-                        mixer_l     <= mixer_sum_l(mixer_sum_l'left - 5  downto mixer_sum_l'left - 5 - OUTPUT_WIDTH + 1);
-                        mixer_r     <= mixer_sum_r(mixer_sum_l'left - 5  downto mixer_sum_l'left - 5 - OUTPUT_WIDTH + 1);
-                        mixer_load  <= '1';
-                    when others =>
-                        mixer_load  <= '0';
-                end case;
+                -- This actually happens much later, when the rate counter expires
+                if pipe_state(3) = st_output then
+                    -- Use the left most bits when mapping mixer_sum
+                    -- mixer_l     <= mixer_sum_l(mixer_sum_l'left downto mixer_sum_l'left - OUTPUT_WIDTH + 1);
+                    -- mixer_r     <= mixer_sum_r(mixer_sum_r'left downto mixer_sum_r'left - OUTPUT_WIDTH + 1);
+                    mixer_l     <= mixer_sum_l(mixer_sum_l'left - 5  downto mixer_sum_l'left - 5 - OUTPUT_WIDTH + 1);
+                    mixer_r     <= mixer_sum_r(mixer_sum_l'left - 5  downto mixer_sum_l'left - 5 - OUTPUT_WIDTH + 1);
+                    mixer_load  <= '1';
+                else
+                    mixer_load  <= '0';
+                end if;
             end if;
         end if;
     end process;
 
     ----------------------------------------------------------------------------------
-    -- DSP pipeline stage 4 - save the filter result in sign/magnitude format
-    --
-    --
-    -- Note: this feeds back to stage 1, so the state machine must insert three
-    -- stall states before usimg the channel sum/magnitude values
+    -- DSP pipeline stage 4 - Save the filter result in sign/magnitude format
     ----------------------------------------------------------------------------------
+
+    -- Note: stage 4 snapshots the accumulator into channel sign and
+    -- magnitude registers. Thesefeeds back to stage 1, so the state
+    -- machine must insert several stall states before using the
+    -- channel sum/magnitude values
 
     process(clk)
         variable tmp : signed(SAMPLE_WIDTH * 2 - 1 downto 0);
     begin
         if rising_edge(clk) then
             if clk_en = '1' then
-                if dsp_ctrl(4) = dsp_save then
+                if pipe_state(4) = st_save then
+                    channel_sign <= '0';
                     tmp := accumulator(ACCUMULATOR_WIDTH - 1 downto SAMPLE_WIDTH);
                     if tmp < 0 then
                         channel_sign <= '1';
@@ -661,6 +702,9 @@ begin
                     else
                         channel_sign <= '0';
                     end if;
+                    -- TODO: double check we extract the right bits
+                    -- here, and later combine with a shift of
+                    -- SAMPLE_WIDTH - 1.
                     channel_mag_lsb <= signed("0" & std_logic_vector(tmp(SAMPLE_WIDTH     - 2 downto                0)));
                     channel_mag_msb <= signed("0" & std_logic_vector(tmp(SAMPLE_WIDTH * 2 - 3 downto SAMPLE_WIDTH - 1)));
                 end if;
