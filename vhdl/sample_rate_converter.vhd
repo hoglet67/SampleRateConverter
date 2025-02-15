@@ -45,11 +45,11 @@ entity sample_rate_converter is
     generic (
         OUTPUT_RATE       : integer;
         OUTPUT_WIDTH      : integer;
-        OUTPUT_SHIFT      : integer := 13;
+        OUTPUT_SHIFT      : integer := 12;
         FILTER_NTAPS      : integer;
         FILTER_L          : t_int_array;
         FILTER_M          : integer;
-        FILTER_SHIFT      : integer := 15;
+        FILTER_SHIFT      : integer := 16;
         CHANNEL_TYPE      : t_channel_type_array;
         BUFFER_A_WIDTH    : integer;
         COEFF_A_WIDTH     : integer;
@@ -648,35 +648,32 @@ begin
     --
     -- The DSP pipeline does:
     --   [1]       filter = sum(input sample x filter coeffient)
-    --   [2]  channel_mag = filter  >> 18
+    --   [2]  channel_mag = filter  >> FILTER_SHIFT (=16)
     --   [3]      channel = channel_mag * L * volume
     --   [4]   mixer_sum += channel * sign
     --
-    -- Overall the filter coefficients were calculated to provide an
-    -- overall gain of 384 [ the LCM of 6, 16 and 64 ]. There is also
-    -- a fixed scaling factor of 2^15 so the coefficients occupy as
-    -- much of the 18-bits of precision as possible.
+    -- The filter coefficients were calculated to provide an overall
+    -- filter gain of 256. There is also a fixed scaling factor of
+    -- 2^16 so the coefficients occupy as much of the 18-bits of
+    -- precision as possible.
     --
-    -- The interpolation process then reduces the gain by a factor of
-    -- L, so the overall gain at the end of step [1] is:
+    -- The interpolation process reduces the gain by a factor of L, so
+    -- the overall gain at the end of step [1] is:
     --
-    --    Music 5000: L=128 => Gain of   3 * 2^15
-    --           PSG: L= 24 => Gain of  16 * 2^15
-    --           SID: L=  6 => Gain of  64 * 2^15
-    --    Note: the 3/16/128 values come from 384/L
+    --    Music 5000: L=128 => Gain of   2.00 * 2^16
+    --           PSG: L= 24 => Gain of  10.67 * 2^16
+    --           SID: L=  6 => Gain of  42.67 * 2^16
+    --    Note: the gain come from 256/L
     --
-    -- Step [2] divides by 2^18, so the overall:
+    -- Step [2] divides by 2^16, so the overall:
     --
-    --    Music 5000: L=128 => Gain of  3 / 2^3 = 0.375 [ LOSS OF PRECISION ? ]
-    --           PSG: L= 24 => Gain of 16 / 2^3 = 1.000
-    --           SID: L=  6 => Gain of 64 / 2^3 = 8.000
+    --    Music 5000: L=128 => Gain of  2.00
+    --           PSG: L= 24 => Gain of 10.35
+    --           SID: L=  6 => Gain of 42.67
     --
     -- Step [3] multiplies by L * volume (0..255), so overall:
     --
-    -- All sources now have a gain of 384 * volume / 2^3 = 48 * volume
-    --
-    -- Lets assume the we correct the error, and step [2] divides by
-    -- 2^15. How much precision is, then, is needed at each step?
+    -- All sources now have a gain of 256 * volume
     --
     --   [1] filter = sum(input sample x filter coeffient)
     --
@@ -691,9 +688,9 @@ begin
     -- 54 bits wide in Gowin and 48 bits wide in Xilinx/Altera. This
     -- is set by the ACCUMULATOR_WIDTH generic.
     --
-    --   [2] channel_mag = filter >> 15
+    --   [2] channel_mag = filter >> 16
     --
-    -- This needs 45 - 15 = 30 bits.
+    -- This needs 45 - 16 = 29 bits.
     --
     --   [3] channel = channel_mag * L * volume
     --
@@ -714,10 +711,10 @@ begin
     --
     -- The channel result size is best thought of as needing:
     --    sample width: 18 bits (1+17)
-    --     filter gain:  9 bits (fixed at 384)
+    --     filter gain:  8 bits (fixed at 256)
     --          volume:  8 bits
     --                  --
-    --                  35 bits
+    --                  34 bits
     --
     --   [4] mixer_sum += channel * sign
     --
@@ -728,14 +725,11 @@ begin
     --
     -- So using 2 * SAMPLE_WIDTH for the channel sum will suffice.
     --
+    -- The final issue is mapping the mixer_sum (2 * SAMPLE_WIDTH=36)
+    -- to the output port (OUTPUT_WIDTH=20)
     --
-    -- The final issue is mapping the mixer_sum (2 * SAMPLE_WIDTH) to
-    -- the output port.
-    --
-    -- To simply this, we'll assume the filter gain is 256.
-    --
-    -- The best way to think of the mixer sum is fixed point value
-    -- with 34 digits to the right of the point:
+    -- The best way to think of the mixer sum is as a fixed point
+    -- value with 33 digits to the right of the point:
     --     . <17 bits> <8 bits> <8 bits>
     --
     -- <17 bits> comes from the magnitude of the input values
@@ -748,8 +742,14 @@ begin
     -- This raises the question of overflow.
     --
     -- If we select the 20 bits to the right of the decimal point
-    -- (bits 32..15) then with one source playing, even at at volume
-    -- 255, it will never clip.
+    -- (bits 32..13) then with one source playing, even at at volume
+    -- 255, it will never clip:
+    --
+    --                          mixer_sum
+    --                     <bit 33> . <bit 32>            <bit 0>
+    --                           |     |                       |
+    --   <sign extesion + overflow> . <17 bits> <8 bits> <8 bits>
+    --                       <sign> . <19 bits>         <14 bits>
     --
     -- If three sources are playing at the same time, then clipping is
     -- possible, bit if that happens the user can turn the volume
@@ -762,18 +762,10 @@ begin
     -- would give unity gain. This then gives scope for the user to
     -- boost Music 5000 tracks by 12dB if necessary.
     --
-    -- So instead of selecting bits 32..15, we select propose
-    -- selecting bits 30..13 and range check to avoid clipping.
+    -- So instead of selecting bits 33..14, we select propose
+    -- selecting bits 31..12 and range check to avoid clipping.
     --
-    -- This should be configured as a generic OUTPUT_SHIFT.
-    --
-    -- Actions:
-    -- 0. Fix incorrect PSG gain in Core or we'll get confused
-    -- 1. Change shift factor from 2>>18 to 2>>15
-    -- 2. Update filter coefficients for a gain of 256
-    -- 3. Set default volume to 64
-    -- 4. Add a generic OUTPUT_SHIFT = 13
-    -- 5. Clip
+    -- The RHS of this range is configured as a generic (OUTPUT_SHIFT).
 
     process(clk)
         variable tmp : signed(2 * SAMPLE_WIDTH - OUTPUT_SHIFT - 1 downto 0);

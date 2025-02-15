@@ -36,15 +36,19 @@ freqz(hc,1,512,Fsimm1)
 # Scale coefficients to cope with gain loss due to interpolation
 #hc = hc * L;
 
-# Set the gain to the LCM of 6,24,128
-hc = hc * 384;
+# Set a fixed gain of 256. This is the largest value that,
+# combined with an 8-bit volume, will comfortably fit in
+# a 18-bit signed multiplier operand ( in scaling step)
+hc = hc * 2^8;
 
 hc_min = min(hc)
 hc_max = max(hc)
 hc_sum = sum(hc)
 
-# Scale coefficients to be represented as 16-bit signed integers
-hc = round(hc * 2^15);
+# Scale coefficients to occupy the full 18-bit precision:
+# hc_min = -20582
+# hc_max =  98544
+hc = round(hc * 2^16);
 
 # Log some stats
 hc_min = min(hc)
