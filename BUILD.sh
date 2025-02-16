@@ -2,14 +2,15 @@
 
 suffix=float.wav
 
-EXTRA=-DTEST_VHDL
+EXTRA="-DVHDL=\"coefficients_vhdl2.h\""
 
 gcc $EXTRA -DTEST_250000_48000 src/test.c src/tinywav.c -o build/test
 
 mkdir -p build/250000
 
 for i in \
-    Square_525Hz_6dB
+    Square_525Hz_6dB \
+    Swept
 do
     infile=tests/250000/${i}_${suffix}
     outfile=build/250000/${i}_${suffix}

@@ -11,7 +11,7 @@
 // LCM is 6MHz
 
 #ifdef VHDL
-#include "coefficients_vhdl2.h"
+#include VHDL
 #else
 #include "coefficients_46875_48000_60.h"
 #endif
@@ -29,7 +29,7 @@
 // LCM is 6MHz
 
 #ifdef VHDL
-#include "coefficients_vhdl2.h"
+#include VHDL
 #else
 #include "coefficients_250000_48000_60.h"
 #endif
@@ -44,7 +44,7 @@
 // LCM is 14.112MHZ
 
 #ifdef VHDL
-#include "coefficients_vhdl2.h"
+#include VHDL
 #else
 #include "coefficients_96000_44100_60.h"
 #endif
@@ -201,7 +201,7 @@ int main(int argc, char **argv) {
             // Do the calculation in integer with a scale factor
             sum += d * hc[p * L + k];
          }
-#ifdef TEST_VHDL
+#ifdef VHDL
          // Fudge factor for the additional scale in the VHDL version
          sum *= L;
          sum >>= 24;
@@ -219,7 +219,6 @@ int main(int argc, char **argv) {
          // Updates k and m incrementally such that:
          //     k = (m * M) % L
          //     n = (m * M) / L
-
          k += M % L;
          if (k >= L) {
             k -= L;
@@ -227,6 +226,7 @@ int main(int argc, char **argv) {
          } else {
             n += (M / L);
          }
+
          /* k += M; */
          /* while (k >= L) { */
          /*    k -= L; */
