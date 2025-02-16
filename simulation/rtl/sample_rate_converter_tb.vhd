@@ -39,7 +39,7 @@ architecture Behavioral of sample_rate_converter_tb is
     signal m5k_audio_load  : std_logic := '0';
     signal mixer_l         : signed(OUTPUT_WIDTH - 1 downto 0);
     signal mixer_r         : signed(OUTPUT_WIDTH - 1 downto 0);
-    signal mixer_load      : std_logic := '0';
+    signal mixer_strobe    : std_logic := '0';
 
     signal channel_in      : t_sample_array(0 to NUM_CHANNELS - 1);
     signal channel_clken   : std_logic_vector(NUM_CHANNELS - 1 downto 0);
@@ -120,7 +120,7 @@ begin
     process(clk48)
     begin
         if rising_edge(clk48) then
-            if mixer_load = '1' then
+            if mixer_strobe = '1' then
                 report
                     integer'image(to_integer(mixer_l)) & " " &
                     integer'image(to_integer(mixer_r));
@@ -161,7 +161,7 @@ begin
             channel_clken     => channel_clken,
             channel_load      => channel_load,
             channel_in        => channel_in,
-            mixer_load        => mixer_load,
+            mixer_strobe      => mixer_strobe,
             mixer_l           => mixer_l,
             mixer_r           => mixer_r
             );

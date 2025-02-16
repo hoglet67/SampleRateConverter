@@ -95,7 +95,7 @@ architecture rtl of sample_rate_converter_top is
     -- Resampler outputs
     signal mixer_l         : signed(OUTPUT_WIDTH - 1 downto 0);
     signal mixer_r         : signed(OUTPUT_WIDTH - 1 downto 0);
-    signal mixer_load      : std_logic := '0';
+    signal mixer_strobe    : std_logic := '0';
 
     -- Copy of final output
     signal audio_pcm_int   : std_logic_vector(15 downto 0);
@@ -202,7 +202,7 @@ begin
             channel_clken     => channel_clken,
             channel_load      => channel_load,
             channel_in        => channel_in,
-            mixer_load        => mixer_load,
+            mixer_strobe      => mixer_strobe,
             mixer_l           => mixer_l,
             mixer_r           => mixer_r
             );
@@ -224,7 +224,7 @@ begin
                 pa_en      => pa_en
                 );
 
-    audio_load <= mixer_load;
+    audio_load <= mixer_strobe;
     audio_pcm_int <= std_logic_vector(mixer_l(19 downto 4));
     audio_pcm <= audio_pcm_int;
 

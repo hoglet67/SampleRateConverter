@@ -71,7 +71,7 @@ entity sample_rate_converter is
         channel_in        : in  t_sample_array(0 to NUM_CHANNELS - 1);
 
         -- Stereo output
-        mixer_load        : out std_logic;
+        mixer_strobe      : out std_logic;
         mixer_l           : out signed(OUTPUT_WIDTH - 1 downto 0);
         mixer_r           : out signed(OUTPUT_WIDTH - 1 downto 0)
         );
@@ -775,7 +775,7 @@ begin
             if clk_en = '1' then
                 -- This actually happens much later, when the rate counter expires
                 if pipe_state(3) = st_output then
-                    mixer_load  <= '1';
+                    mixer_strobe  <= '1';
                     -- Select the bits to output using OUTPUT_SHIFT as per above long discussion
                     tmp := mixer_sum_l(2 * SAMPLE_WIDTH - 1 downto OUTPUT_SHIFT);
                     if tmp < MIN_OUTPUT then
@@ -792,7 +792,7 @@ begin
                     end if;
                     mixer_r <= tmp(OUTPUT_WIDTH - 1 downto 0);
                 else
-                    mixer_load  <= '0';
+                    mixer_strobe  <= '0';
                 end if;
             end if;
         end if;
