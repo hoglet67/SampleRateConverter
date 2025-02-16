@@ -1,0 +1,60 @@
+[*]
+[*] GTKWave Analyzer v3.3.86 (w)1999-2017 BSI
+[*] Thu Feb 13 19:25:12 2025
+[*]
+[dumpfile] "/disk1/home/dmb/atom/SampleRateConverter/simulation/gate/audio.vcd"
+[dumpfile_mtime] "Thu Feb 13 19:22:54 2025"
+[dumpfile_size] 45604952
+[savefile] "/disk1/home/dmb/atom/SampleRateConverter/simulation/gate/sample_rate_converter.gtkw"
+[timestart] 0
+[size] 1853 1145
+[pos] -143 -143
+*-36.000000 852000000000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] sample_rate_converter_tb.
+[treeopen] sample_rate_converter_tb.top_inst.
+[treeopen] sample_rate_converter_tb.top_inst.sample_rate_converter_inst.
+[sst_width] 223
+[signals_width] 198
+[sst_expanded] 1
+[sst_vpaned_height] 344
+@28
+sample_rate_converter_tb.top_inst.audio_load
+@22
+sample_rate_converter_tb.top_inst.audio_pcm[15:0]
+sample_rate_converter_tb.top_inst.audio_pcm_int[15:0]
+@28
+sample_rate_converter_tb.top_inst.audio_spdif
+sample_rate_converter_tb.top_inst.btn1
+@22
+sample_rate_converter_tb.top_inst.channel_clken[3:0]
+sample_rate_converter_tb.top_inst.channel_load[3:0]
+@28
+sample_rate_converter_tb.top_inst.clk48
+@22
+sample_rate_converter_tb.top_inst.div12_counter[23:0]
+@28
+sample_rate_converter_tb.top_inst.i2s_bclk
+sample_rate_converter_tb.top_inst.i2s_din
+sample_rate_converter_tb.top_inst.i2s_lrclk
+sample_rate_converter_tb.top_inst.mhz4_clken
+@22
+sample_rate_converter_tb.top_inst.mixer_l[19:0]
+@28
+sample_rate_converter_tb.top_inst.mixer_load
+@22
+sample_rate_converter_tb.top_inst.mixer_r[19:0]
+@28
+sample_rate_converter_tb.top_inst.pa_en
+sample_rate_converter_tb.top_inst.powerup_reset_n
+@22
+sample_rate_converter_tb.top_inst.psg_audio[17:0]
+@28
+sample_rate_converter_tb.top_inst.psg_strobe
+@22
+sample_rate_converter_tb.top_inst.reset_counter[10:0]
+sample_rate_converter_tb.top_inst.sound_ao_pcm[13:0]
+@28
+sample_rate_converter_tb.top_inst.sound_strobe
+sample_rate_converter_tb.top_inst.sys_clk
+[pattern_trace] 1
+[pattern_trace] 0
