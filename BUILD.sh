@@ -2,7 +2,9 @@
 
 suffix=float.wav
 
-EXTRA="-DVHDL=\"coefficients_vhdl2.h\""
+#EXTRA="-DVHDL=\"coefficients_vhdl2.h\""
+#EXTRA="-DVHDL=\"coefficients_fir2_hanning.h\""
+EXTRA="-DVHDL=\"coefficients_fir2_kaiser10.h\""
 
 gcc $EXTRA -DTEST_250000_48000 src/test.c src/tinywav.c -o build/test
 

@@ -24,12 +24,17 @@ N = dB * Fsimm1 / (22 * delta_f)
 # Round up to the next multiple of L
 N = L * ceil(N / L)
 
-# HACK REMOVE ME
-# N = L * 3
+# Original version was dumb in lots of respects
+# f =  [f1] / (Fsimm1 / 2)
+#h c = fir1(N-1, f,'low');
 
-# Calculate N tap FIR filter coefficients
-f =  [f1] / (Fsimm1 / 2)
-hc = fir1(N-1, f,'low');
+# This uses FIR2 so we get a trasition band!
+f = [0 (2*f1/Fsimm1) (2*f2/Fsimm1) 1]
+a =  [1 1 0 0]
+#hc = fir2(N-1, f, a);
+
+# Current version using a kaiser window
+hc = fir2(N-1, f, a, kaiser(N, 10));
 
 freqz(hc,1,512,Fsimm1)
 

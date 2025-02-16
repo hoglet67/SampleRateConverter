@@ -5,7 +5,7 @@ not_in_git/
 octave-workspace
 audio.vcd
 work-obj93.cf
-*.plot
+audio.plot
 *.log
 **/impl/pnr
 **/impl/gwsynthesis
