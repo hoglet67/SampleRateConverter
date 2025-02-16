@@ -2,29 +2,9 @@
 
 suffix=float.wav
 
-gcc -DTEST_VHDL src/test.c src/tinywav.c -o build/test
+EXTRA=-DTEST_VHDL
 
-mkdir -p build/vhdl
-
-for i in \
-    Square_525Hz_6dB \
-    Square_1953Hz_6dB
-do
-
-    infile=tests/vhdl/${i}_${suffix}
-    outfile=build/vhdl/${i}_${suffix}
-    echo ${infile}
-    channels=1
-
-    if [ -f ${infile} ]; then
-        ./build/test ${infile} ${outfile} ${channels} 1000
-    else
-        echo "   ...skipping as file ${infile} not present"
-    fi
-
-done
-
-gcc -DTEST_250000_48000 src/test.c src/tinywav.c -o build/test
+gcc $EXTRA -DTEST_250000_48000 src/test.c src/tinywav.c -o build/test
 
 mkdir -p build/250000
 
@@ -56,7 +36,7 @@ unzip -u $FILE
 cd -
 
 
-gcc -DTEST_96000_44100 src/test.c src/tinywav.c -o build/test
+gcc $EXTRA -DTEST_96000_44100 src/test.c src/tinywav.c -o build/test
 
 for i in Pulses Swept Tone1kHz
 do
@@ -71,7 +51,7 @@ do
     ./build/test ${infile} ${outfile} ${channels} 1000
 done
 
-gcc -DTEST_46875_48000 src/test.c src/tinywav.c -o build/test
+gcc $EXTRA -DTEST_46875_48000 src/test.c src/tinywav.c -o build/test
 
 mkdir -p build/46875
 

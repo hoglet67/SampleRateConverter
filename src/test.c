@@ -5,21 +5,18 @@
 //#define TEST_46875_48000
 //#define TEST_250000_48000
 //#define TEST_96000_44100
-#if defined(TEST_VHDL)
 
-#include "coefficients_vhdl1.h"
-
-#define               L    24
-#define               M   125
-#define  IN_SAMPLE_RATE 250000
-#define OUT_SAMPLE_RATE 48000
-
-#elif defined(TEST_46875_48000)
+#if defined(TEST_46875_48000)
 
 // LCM is 6MHz
 
-//#include "coefficients_46875_48000_extended.h"
+#ifdef VHDL
+#include "coefficients_vhdl2.h"
+#else
 #include "coefficients_46875_48000_60.h"
+#endif
+
+//#include "coefficients_46875_48000_extended.h"
 //#include "coefficients_46875_48000_truncated.h"
 
 #define               L   128
@@ -31,7 +28,11 @@
 
 // LCM is 6MHz
 
+#ifdef VHDL
+#include "coefficients_vhdl2.h"
+#else
 #include "coefficients_250000_48000_60.h"
+#endif
 
 #define               L    24
 #define               M   125
@@ -42,7 +43,11 @@
 
 // LCM is 14.112MHZ
 
+#ifdef VHDL
+#include "coefficients_vhdl2.h"
+#else
 #include "coefficients_96000_44100_60.h"
+#endif
 
 #define               L   147
 #define               M   320
@@ -196,9 +201,12 @@ int main(int argc, char **argv) {
             // Do the calculation in integer with a scale factor
             sum += d * hc[p * L + k];
          }
-         sum /= HSCALE;
 #ifdef TEST_VHDL
-         sum >>= 4;
+         // Fudge factor for the additional scale in the VHDL version
+         sum *= L;
+         sum >>= 24;
+#else
+         sum /= HSCALE;
 #endif
          if (sum < min_out) {
             min_out = sum;
