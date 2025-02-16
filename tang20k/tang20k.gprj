@@ -8,7 +8,7 @@
         <File path="src/i2s_simple.vhd" type="file.vhdl" enable="1"/>
         <File path="src/sn76489.vhd" type="file.vhdl" enable="1"/>
         <File path="src/sample_rate_converter_top.vhd" type="file.vhdl" enable="1"/>
-        <File path="../vhdl/buffer_ram_gowin.vhd" type="file.vhdl" enable="1"/>
+        <File path="../vhdl/buffer_ram.vhd" type="file.vhdl" enable="1"/>
         <File path="../vhdl/coeff_rom.vhd" type="file.vhdl" enable="1"/>
         <File path="../vhdl/sample_rate_converter.vhd" type="file.vhdl" enable="1"/>
         <File path="../vhdl/sample_rate_converter_pkg.vhd" type="file.vhdl" enable="1"/>

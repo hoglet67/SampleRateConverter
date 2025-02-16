@@ -7,10 +7,9 @@ use work.sample_rate_converter_pkg.all;
 
 entity sample_rate_converter_top is
     generic (
-        sample_width : integer := 18;
-        output_width : integer := 20
---        test_tone    : integer := 525;
---        test_level   : integer := 2047
+        NUM_CHANNELS : integer := 4;
+        SAMPLE_WIDTH : integer := 18;
+        OUTPUT_WIDTH : integer := 20
         );
     port (
         sys_clk         : in    std_logic;
@@ -85,17 +84,17 @@ architecture rtl of sample_rate_converter_top is
     signal sound_strobe    : std_logic;
 
     -- Massaged into out format
-    signal psg_audio       : signed(sample_width - 1 downto 0) := (others => '0');
+    signal psg_audio       : signed(SAMPLE_WIDTH - 1 downto 0) := (others => '0');
     signal psg_strobe      : std_logic := '0';
 
     -- Resampler inputs
-    signal channel_in      : t_sample_array;
+    signal channel_in      : t_sample_array(0 to NUM_CHANNELS - 1);
     signal channel_clken   : std_logic_vector(NUM_CHANNELS - 1 downto 0);
     signal channel_load    : std_logic_vector(NUM_CHANNELS - 1 downto 0);
 
     -- Resampler outputs
-    signal mixer_l         : signed(output_width - 1 downto 0);
-    signal mixer_r         : signed(output_width - 1 downto 0);
+    signal mixer_l         : signed(OUTPUT_WIDTH - 1 downto 0);
+    signal mixer_r         : signed(OUTPUT_WIDTH - 1 downto 0);
     signal mixer_load      : std_logic := '0';
 
     -- Copy of final output
@@ -175,15 +174,16 @@ begin
             );
 
     -- External ports
-    psg_audio  <= signed((17 downto 14 => sound_ao_pcm(13)) & sound_ao_pcm);
+    psg_audio  <= signed(sound_ao_pcm & "0000");
     psg_strobe <= sound_strobe and mhz4_clken;
 
     channel_clken <= "1111";
     channel_load  <= "00" & psg_strobe & "0";
-    channel_in    <= (to_signed(0, sample_width), psg_audio, to_signed(0, sample_width), to_signed(0, sample_width));
+    channel_in    <= (to_signed(0, SAMPLE_WIDTH), psg_audio, to_signed(0, SAMPLE_WIDTH), to_signed(0, SAMPLE_WIDTH));
 
     sample_rate_converter_inst : entity work.sample_rate_converter
         generic map (
+            NUM_CHANNELS      => NUM_CHANNELS,
             OUTPUT_RATE       => 1000,           -- 48KHz
             OUTPUT_WIDTH      => 20,             -- 20 bits
             FILTER_NTAPS      => 3840,
@@ -209,8 +209,9 @@ begin
 
         i2s : entity work.i2s_simple
             generic map (
+                ATTENUATE  => 2,
                 CLOCKSPEED => 48000000,
-                SAMPLERATE => 48000      -- Sample Rate of resampler
+                SAMPLERATE => 46875 -- Can't get to 48KHz from 48MHz
                 )
             port map (
                 clock      => clk48,

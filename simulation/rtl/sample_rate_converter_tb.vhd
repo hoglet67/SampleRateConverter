@@ -7,9 +7,10 @@ use work.sample_rate_converter_pkg.all;
 
 entity sample_rate_converter_tb is
     generic (
-        sample_width : integer := 18;
-        output_width : integer := 20;
-        test_tone    : integer := 525
+        NUM_CHANNELS : integer := 4;
+        SAMPLE_WIDTH : integer := 18;
+        OUTPUT_WIDTH : integer := 20;
+        TEST_TONE    : integer := 525
     );
 end sample_rate_converter_tb;
 
@@ -27,20 +28,20 @@ architecture Behavioral of sample_rate_converter_tb is
     signal m5k_counter     : unsigned(11 downto 0) := (others => '0');
 
     -- Step input of from 0 to +/- 95% full scale value
-    constant step          : integer := (2 ** (sample_width - 1)) * 95 / 100;
+    constant step          : integer := (2 ** (SAMPLE_WIDTH - 1)) * 95 / 100;
 
-    signal sid_audio       : signed(sample_width - 1 downto 0) := (others => '0');
+    signal sid_audio       : signed(SAMPLE_WIDTH - 1 downto 0) := (others => '0');
     signal sid_audio_load  : std_logic := '0';
-    signal psg_audio       : signed(sample_width - 1 downto 0) := (others => '0');
+    signal psg_audio       : signed(SAMPLE_WIDTH - 1 downto 0) := (others => '0');
     signal psg_audio_load  : std_logic := '0';
-    signal m5k_audio_l     : signed(sample_width - 1 downto 0) := (others => '0');
-    signal m5k_audio_r     : signed(sample_width - 1 downto 0) := (others => '0');
+    signal m5k_audio_l     : signed(SAMPLE_WIDTH - 1 downto 0) := (others => '0');
+    signal m5k_audio_r     : signed(SAMPLE_WIDTH - 1 downto 0) := (others => '0');
     signal m5k_audio_load  : std_logic := '0';
-    signal mixer_l         : signed(output_width - 1 downto 0);
-    signal mixer_r         : signed(output_width - 1 downto 0);
+    signal mixer_l         : signed(OUTPUT_WIDTH - 1 downto 0);
+    signal mixer_r         : signed(OUTPUT_WIDTH - 1 downto 0);
     signal mixer_load      : std_logic := '0';
 
-    signal channel_in      : t_sample_array;
+    signal channel_in      : t_sample_array(0 to NUM_CHANNELS - 1);
     signal channel_clken   : std_logic_vector(NUM_CHANNELS - 1 downto 0);
     signal channel_load    : std_logic_vector(NUM_CHANNELS - 1 downto 0);
 
@@ -87,28 +88,28 @@ begin
                     reset_n <= '1';
                 end if;
                 -- if sid_audio_load <= '1' then
-                --     if sid_counter = 1000000 / test_tone / 2 - 1 then
-                --         sid_audio <= to_signed(step, sample_width);
-                --     elsif sid_counter = 1000000 / test_tone - 1 then
-                --         sid_audio <= to_signed(-step, sample_width);
+                --     if sid_counter = 1000000 / TEST_TONE / 2 - 1 then
+                --         sid_audio <= to_signed(step, SAMPLE_WIDTH);
+                --     elsif sid_counter = 1000000 / TEST_TONE - 1 then
+                --         sid_audio <= to_signed(-step, SAMPLE_WIDTH);
                 --         sid_counter <= (others => '0');
                 --     end if;
                 -- end if;
                 if psg_audio_load <= '1' then
-                    if psg_counter = 250000 / test_tone / 2 -1 then
-                        psg_audio <= to_signed(step, sample_width);
-                    elsif psg_counter = 250000 / test_tone - 1 then
-                        psg_audio <= to_signed(-step, sample_width);
+                    if psg_counter = 250000 / TEST_TONE / 2 -1 then
+                        psg_audio <= to_signed(step, SAMPLE_WIDTH);
+                    elsif psg_counter = 250000 / TEST_TONE - 1 then
+                        psg_audio <= to_signed(-step, SAMPLE_WIDTH);
                         psg_counter <= (others => '0');
                     end if;
                 end if;
                 -- if m5k_audio_load <= '1' then
-                --     if m5k_counter = 46875 / test_tone / 2 -1 then
-                --         m5k_audio_l <= to_signed(step, sample_width);
-                --         m5k_audio_r <= to_signed(step, sample_width);
-                --     elsif m5k_counter = 46875 / test_tone - 1 then
-                --         m5k_audio_l <= to_signed(-step, sample_width);
-                --         m5k_audio_r <= to_signed(-step, sample_width);
+                --     if m5k_counter = 46875 / TEST_TONE / 2 -1 then
+                --         m5k_audio_l <= to_signed(step, SAMPLE_WIDTH);
+                --         m5k_audio_r <= to_signed(step, SAMPLE_WIDTH);
+                --     elsif m5k_counter = 46875 / TEST_TONE - 1 then
+                --         m5k_audio_l <= to_signed(-step, SAMPLE_WIDTH);
+                --         m5k_audio_r <= to_signed(-step, SAMPLE_WIDTH);
                 --         m5k_counter <= (others => '0');
                 --     end if;
                 -- end if;
@@ -140,6 +141,7 @@ begin
 
     sample_rate_converter_inst : entity work.sample_rate_converter
         generic map (
+            NUM_CHANNELS      => NUM_CHANNELS,
             OUTPUT_RATE       => 1000,           -- 48KHz
             OUTPUT_WIDTH      => 20,             -- 20 bits
             FILTER_NTAPS      => 3840,
