@@ -6,40 +6,75 @@ close all;
 clear all;
 #clf;
 
-dB  = 84
-L = 96
-M = 125
-Fsin = 62500
-Fsimm1 = Fsin * L
-Fsout = Fsimm1 / M
 
-f1 = 18000
-f2 = min(Fsin/2, Fsout/2)
+# Estimate N
+#dB  = 84
+#L = 96
+#M = 125
+#Fsin = 62500
+#Fsimm1 = Fsin * L
+#Fsout = Fsimm1 / M
+#f1 = 18000
+#f2 = min(Fsin/2, Fsout/2)
+#delta_f = f2 - f1;
+## Calculate minimum number of taps
+#N = dB * Fsimm1 / (22 * delta_f)
+## Round up to the next multiple of L
+#N = L * ceil(N / L)
 
-delta_f = f2 - f1;
 
-# Calculate minimum number of taps
-N = dB * Fsimm1 / (22 * delta_f)
+Fsimm1 = 6000000
 
-# Round up to the next multiple of L
-N = L * ceil(N / L)
+# For reference, here's the original filter
+fref = 18000
+nref = 3840
+hcref = fir1(nref-1, [ 2*fref/Fsimm1 ] ,'low');
 
-# Original version was dumb in lots of respects
-# f =  [f1] / (Fsimm1 / 2)
-#h c = fir1(N-1, f,'low');
+# start of transition band
+f1 = 16000
 
-# This uses FIR2 so we get a trasition band!
-f = [0 (2*f1/Fsimm1) (2*f2/Fsimm1) 1]
-a =  [1 1 0 0]
-#hc = fir2(N-1, f, a);
+# end of transition band
+f2 = 24000
 
-# Current version using a kaiser window
-hc = fir2(N-1, f, a, kaiser(N, 10));
+# pass band deviation
+# (this seems to have no effect)
+att1 = db2mag(-60)
 
-freqz(hc,1,512,Fsimm1)
+# stop band deviation
+# manually chosen with 16K/24K transition so kaiserord produces n=3840
+att2 = db2mag(-81.5)
 
-# Scale coefficients to cope with gain loss due to interpolation
-#hc = hc * L;
+# Calculate a kaiser window FIR filter than meets these needs
+[n,Wn,beta,ftype] = kaiserord([f1 f2], [1 0],[att1 att2], Fsimm1)
+
+# Output the transition frequency
+Wn * Fsimm1 / 2
+
+# Calculate the filter using FIR1
+hc = fir1(n-1, Wn, ftype, kaiser(n, beta));
+
+# Graph the filter
+# freqz(hc, 1, 15000:50:30000, Fsimm1)
+
+[h{1},w{1}] = freqz(hcref, 1, 15000:50:30000, Fsimm1);
+[h{2},w{2}] = freqz(hc, 1, 15000:50:30000, Fsimm1);
+
+figure
+subplot(2,1,1)
+hold on
+for k = 1:2
+    plot(w{k},20*log10(abs(h{k})))
+end
+hold off
+grid
+subplot(2,1,2)
+hold on
+for k = 1:2
+    plot(w{k},unwrap(angle(h{k})))
+end
+hold off
+grid
+
 
 # Set a fixed gain of 256. This is the largest value that,
 # combined with an 8-bit volume, will comfortably fit in
